@@ -1,0 +1,12 @@
+{
+  "name": "aqms",
+  "version": "1.0.0",
+  "description": "Integrated AI Query Migration System",
+  "scripts": {
+    "dev": "./dev.sh",
+    "build": "./build.sh",
+    "test": "pytest backend/tests/"
+  },
+  "author": "Antigravity",
+  "license": "MIT"
+}

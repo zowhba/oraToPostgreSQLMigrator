@@ -1,0 +1,38 @@
+{
+  "project_id": "PRJ_SKB_001",
+  "xml_file_name": "ReportMapper.xml",
+  "mapper_namespace": "com.skb.mapper.ReportMapper",
+  "file_created_at": "2026-03-13 14:00:00",
+  "queries": [
+    {
+      "query_id": "selectOrgHierarchy",
+      "tag_name": "select",
+      "attributes": { "parameterType": "String", "resultType": "OrgVO" },
+      "original_sql_xml": "<select id=\"selectOrgHierarchy\" parameterType=\"String\" resultType=\"OrgVO\">\n    SELECT ORG_ID,\n           ORG_NAME,\n           PARENT_ORG_ID,\n           LEVEL AS DEPTH,\n           SYS_CONNECT_BY_PATH(ORG_NAME, ' > ') AS FULL_PATH,\n           CONNECT_BY_ISLEAF AS IS_LEAF\n    FROM TB_ORG\n    START WITH PARENT_ORG_ID IS NULL\n    CONNECT BY PRIOR ORG_ID = PARENT_ORG_ID\n    ORDER SIBLINGS BY SORT_ORDER\n</select>"
+    },
+    {
+      "query_id": "mergeUserStats",
+      "tag_name": "update",
+      "attributes": { "parameterType": "StatsVO" },
+      "original_sql_xml": "<update id=\"mergeUserStats\" parameterType=\"StatsVO\">\n    MERGE INTO TB_USER_STATS T\n    USING (\n        SELECT #{userId} AS USER_ID,\n               #{statDate} AS STAT_DATE\n        FROM DUAL\n    ) S\n    ON (T.USER_ID = S.USER_ID AND T.STAT_DATE = S.STAT_DATE)\n    WHEN MATCHED THEN\n        UPDATE SET\n            LOGIN_CNT = T.LOGIN_CNT + #{loginCnt},\n            PAGE_VIEW = T.PAGE_VIEW + #{pageView},\n            MOD_DATE = SYSDATE\n    WHEN NOT MATCHED THEN\n        INSERT (USER_ID, STAT_DATE, LOGIN_CNT, PAGE_VIEW, REG_DATE)\n        VALUES (S.USER_ID, S.STAT_DATE, #{loginCnt}, #{pageView}, SYSDATE)\n</update>"
+    },
+    {
+      "query_id": "selectPivotReport",
+      "tag_name": "select",
+      "attributes": { "resultType": "map" },
+      "original_sql_xml": "<select id=\"selectPivotReport\" resultType=\"map\">\n    SELECT *\n    FROM (\n        SELECT DEPT_ID,\n               TO_CHAR(ORDER_DATE, 'MM') AS MONTH,\n               TOTAL_AMT\n        FROM TB_ORDER O\n        JOIN TB_CUSTOMER C ON O.CUST_ID = C.CUST_ID\n        WHERE O.ORDER_DATE BETWEEN TO_DATE('20260101', 'YYYYMMDD')\n                               AND TO_DATE('20261231', 'YYYYMMDD')\n    )\n    PIVOT (\n        SUM(TOTAL_AMT)\n        FOR MONTH IN ('01' AS M01, '02' AS M02, '03' AS M03,\n                      '04' AS M04, '05' AS M05, '06' AS M06,\n                      '07' AS M07, '08' AS M08, '09' AS M09,\n                      '10' AS M10, '11' AS M11, '12' AS M12)\n    )\n    ORDER BY DEPT_ID\n</select>"
+    },
+    {
+      "query_id": "selectWithHintAndWmConcat",
+      "tag_name": "select",
+      "attributes": { "parameterType": "map", "resultType": "map" },
+      "original_sql_xml": "<select id=\"selectWithHintAndWmConcat\" parameterType=\"map\" resultType=\"map\">\n    SELECT /*+ INDEX(O IDX_ORDER_DATE) LEADING(O C) USE_NL(C) */\n           O.ORDER_ID,\n           O.CUST_ID,\n           WM_CONCAT(P.PROD_NAME) AS PROD_LIST,\n           LISTAGG(P.PROD_CODE, ',') WITHIN GROUP (ORDER BY P.PROD_CODE) AS PROD_CODES,\n           DBMS_LOB.SUBSTR(O.MEMO, 100, 1) AS MEMO_SHORT\n    FROM TB_ORDER O, TB_CUSTOMER C, TB_ORDER_PROD OP, TB_PRODUCT P\n    WHERE O.CUST_ID = C.CUST_ID(+)\n      AND O.ORDER_ID = OP.ORDER_ID\n      AND OP.PROD_ID = P.PROD_ID\n      AND O.ORDER_DATE >= ADD_MONTHS(SYSDATE, -#{months})\n    GROUP BY O.ORDER_ID, O.CUST_ID, DBMS_LOB.SUBSTR(O.MEMO, 100, 1)\n    HAVING COUNT(*) >= #{minCount}\n</select>"
+    },
+    {
+      "query_id": "selectComplexSubquery",
+      "tag_name": "select",
+      "attributes": { "parameterType": "map", "resultType": "map" },
+      "original_sql_xml": "<select id=\"selectComplexSubquery\" parameterType=\"map\" resultType=\"map\">\n    SELECT A.USER_ID,\n           A.USER_NAME,\n           NVL(B.ORDER_CNT, 0) AS ORDER_CNT,\n           NVL(B.TOTAL_AMT, 0) AS TOTAL_AMT,\n           DECODE(SIGN(NVL(B.TOTAL_AMT, 0) - 1000000), 1, 'VIP', 0, 'VIP', 'NORMAL') AS GRADE,\n           RANK() OVER (ORDER BY NVL(B.TOTAL_AMT, 0) DESC) AS RANK_NO\n    FROM TB_USER A,\n         (\n            SELECT CUST_ID,\n                   COUNT(*) AS ORDER_CNT,\n                   SUM(TOTAL_AMT) AS TOTAL_AMT\n            FROM TB_ORDER\n            WHERE ORDER_DATE BETWEEN TO_DATE(#{startDate}, 'YYYYMMDD')\n                                 AND TO_DATE(#{endDate}, 'YYYYMMDD')\n              AND STATUS != '99'\n            GROUP BY CUST_ID\n         ) B\n    WHERE A.USER_ID = B.CUST_ID(+)\n    <if test=\"grade != null and grade == 'VIP'\">\n      AND NVL(B.TOTAL_AMT, 0) >= 1000000\n    </if>\n    ORDER BY RANK_NO\n    <if test=\"limit != null\">\n      FETCH FIRST #{limit} ROWS ONLY\n    </if>\n</select>"
+    }
+  ]
+}

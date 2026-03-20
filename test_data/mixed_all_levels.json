@@ -1,0 +1,38 @@
+{
+  "project_id": "PRJ_SKB_001",
+  "xml_file_name": "PlanMapper.xml",
+  "mapper_namespace": "com.skb.mapper.PlanMapper",
+  "file_created_at": "2026-03-13 14:00:00",
+  "queries": [
+    {
+      "query_id": "selectSimplePlan",
+      "tag_name": "select",
+      "attributes": { "parameterType": "String", "resultType": "PlanVO" },
+      "original_sql_xml": "<select id=\"selectSimplePlan\" parameterType=\"String\" resultType=\"PlanVO\">\n    SELECT PLAN_ID,\n           PLAN_NAME,\n           NVL(DESCRIPTION, '') AS DESCRIPTION,\n           SYSDATE AS QUERY_DATE\n    FROM TB_PLAN\n    WHERE PLAN_ID = #{planId}\n      AND USE_YN = 'Y'\n</select>"
+    },
+    {
+      "query_id": "selectPlanWithJoin",
+      "tag_name": "select",
+      "attributes": { "parameterType": "map", "resultType": "PlanVO" },
+      "original_sql_xml": "<select id=\"selectPlanWithJoin\" parameterType=\"map\" resultType=\"PlanVO\">\n    SELECT P.PLAN_ID,\n           P.PLAN_NAME,\n           NVL(D.DETAIL_DESC, '없음') AS DETAIL_DESC,\n           DECODE(P.PLAN_TYPE, 'A', '기본형', 'B', '프리미엄', 'C', '엔터프라이즈', '미분류') AS PLAN_TYPE_NM,\n           TO_CHAR(P.START_DATE, 'YYYY-MM-DD') AS START_DT\n    FROM TB_PLAN P, TB_PLAN_DETAIL D\n    WHERE P.PLAN_ID = D.PLAN_ID(+)\n    <if test=\"planType != null\">\n      AND P.PLAN_TYPE = #{planType}\n    </if>\n    <if test=\"startDate != null\">\n      AND P.START_DATE >= TO_DATE(#{startDate}, 'YYYYMMDD')\n    </if>\n    ORDER BY P.PLAN_ID\n</select>"
+    },
+    {
+      "query_id": "selectPlanHierarchy",
+      "tag_name": "select",
+      "attributes": { "resultType": "map" },
+      "original_sql_xml": "<select id=\"selectPlanHierarchy\" resultType=\"map\">\n    SELECT PLAN_ID,\n           PLAN_NAME,\n           PARENT_PLAN_ID,\n           LEVEL AS DEPTH,\n           SYS_CONNECT_BY_PATH(PLAN_NAME, '/') AS FULL_PATH\n    FROM TB_PLAN\n    WHERE USE_YN = 'Y'\n    START WITH PARENT_PLAN_ID IS NULL\n    CONNECT BY PRIOR PLAN_ID = PARENT_PLAN_ID\n</select>"
+    },
+    {
+      "query_id": "deletePlan",
+      "tag_name": "delete",
+      "attributes": { "parameterType": "String" },
+      "original_sql_xml": "<delete id=\"deletePlan\" parameterType=\"String\">\n    DELETE FROM TB_PLAN\n    WHERE PLAN_ID = #{planId}\n</delete>"
+    },
+    {
+      "query_id": "mergePlanStats",
+      "tag_name": "update",
+      "attributes": { "parameterType": "map" },
+      "original_sql_xml": "<update id=\"mergePlanStats\" parameterType=\"map\">\n    MERGE INTO TB_PLAN_STATS T\n    USING (SELECT #{planId} AS PLAN_ID FROM DUAL) S\n    ON (T.PLAN_ID = S.PLAN_ID)\n    WHEN MATCHED THEN\n        UPDATE SET VIEW_CNT = T.VIEW_CNT + 1, MOD_DATE = SYSDATE\n    WHEN NOT MATCHED THEN\n        INSERT (PLAN_ID, VIEW_CNT, REG_DATE)\n        VALUES (S.PLAN_ID, 1, SYSDATE)\n</update>"
+    }
+  ]
+}

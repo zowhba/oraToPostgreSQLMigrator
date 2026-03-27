@@ -12,6 +12,7 @@ class DBConfig(BaseModel):
     db_name: str = Field(..., description="데이터베이스명", examples=["target_pg_db"])
     user: str = Field(..., description="DB 사용자", examples=["migrator"])
     pw: str = Field(..., description="DB 비밀번호")
+    db_schema: Optional[str] = Field(None, description="검색할 스키마명 (미입력 시 public)", examples=["edmp"])
 
 
 class ProjectCreateRequest(BaseModel):

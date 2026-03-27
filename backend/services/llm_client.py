@@ -63,6 +63,15 @@ def _build_user_prompt(original_sql_xml: str, schema_context: str, tag_name: str
 4. Oracle 힌트(/*+ ... */) 제거 또는 PostgreSQL 호환 주석 변환
 5. 시퀀스, 듀얼 테이블(FROM DUAL 제거) 처리
 6. 속성값 내 따옴표 처리: MyBatis 태그의 test 속성 등에서 문자열 리터럴은 &quot; 대신 홑따옴표(')를 사용하십시오. (예: <if test="name == 'A'">)
+7. ★ 날짜 연산 타입 차이 (반드시 준수):
+   - Oracle에서 날짜 - 날짜 = NUMBER(일수). PostgreSQL에서는 TIMESTAMP - TIMESTAMP = INTERVAL
+   - TRUNC(date1 - date2) → EXTRACT(DAY FROM (date1 - date2))::INTEGER
+   - TRUNC(SYSDATE - col) → EXTRACT(DAY FROM (CURRENT_TIMESTAMP - col))::INTEGER
+   - FLOOR(date1 - date2) → FLOOR(EXTRACT(EPOCH FROM (date1 - date2)) / 86400)::INTEGER
+   - 날짜 ± N일: Oracle의 date + 1 = 하루 후 → PostgreSQL date + INTERVAL '1 day'
+   - MONTHS_BETWEEN(d1, d2) → EXTRACT(YEAR FROM AGE(d1, d2)) * 12 + EXTRACT(MONTH FROM AGE(d1, d2))
+   - ADD_MONTHS(d, n) → d + (n || ' months')::INTERVAL
+
 
 ## 응답 형식 (반드시 아래 JSON으로만):
 {{

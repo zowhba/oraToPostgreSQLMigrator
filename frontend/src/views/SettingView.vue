@@ -1,5 +1,12 @@
 <template>
   <div class="setting-view">
+    <!-- 전역 로딩 오버레이 (저장/테스트/상세조회 중) -->
+    <LoadingOverlay
+      :visible="loadingOverlay"
+      :message="loadingMessage"
+      :sub-message="loadingSubMessage"
+    />
+
     <h2 class="page-title">프로젝트 설정</h2>
     <p class="page-desc">프로젝트 정보와 대상 PostgreSQL 접속 정보를 관리합니다.</p>
 
@@ -8,12 +15,20 @@
       <div class="project-list-section">
         <div class="section-header">
           <h3 class="section-title">프로젝트 목록</h3>
-          <button class="btn btn-sm btn-primary" @click="showNewForm">
+          <button class="btn btn-sm btn-primary" @click="showNewForm" :disabled="listLoading">
             + 새 프로젝트
           </button>
         </div>
 
-        <div class="project-list" v-if="projects.length > 0">
+        <!-- 목록 로딩 스켈레톤 -->
+        <div class="skeleton-list" v-if="listLoading">
+          <div class="skeleton-item" v-for="n in 3" :key="n">
+            <div class="skeleton-line long"></div>
+            <div class="skeleton-line short"></div>
+          </div>
+        </div>
+
+        <div class="project-list" v-else-if="projects.length > 0">
           <div
             v-for="proj in projects"
             :key="proj.project_id"
@@ -131,6 +146,17 @@
                 />
               </div>
 
+              <div class="form-group">
+                <label class="form-label">스키마 <span class="optional-label">(optional)</span></label>
+                <input
+                  type="text"
+                  v-model="form.db_config.db_schema"
+                  class="form-input"
+                  placeholder="비워두면 public 사용, 예: edmp"
+                />
+                <span class="form-hint">테이블이 public 외 특정 스키마에 있을 때 입력하세요</span>
+              </div>
+
               <div class="form-row">
                 <div class="form-group flex-1">
                   <label class="form-label">사용자</label>
@@ -166,8 +192,9 @@
                 type="button"
                 class="btn btn-secondary"
                 @click="handleTestConnection"
-                :disabled="!form.project_id || testingConnection || isNewProject"
+                :disabled="!form.project_id || testingConnection || loading || isNewProject"
               >
+                <span v-if="testingConnection" class="btn-spinner"></span>
                 {{ testingConnection ? '테스트 중...' : 'DB 연결 테스트' }}
               </button>
 
@@ -176,14 +203,16 @@
                   type="button"
                   class="btn btn-ghost"
                   @click="cancelForm"
+                  :disabled="loading || testingConnection"
                 >
                   닫기
                 </button>
                 <button
                   type="submit"
                   class="btn btn-primary"
-                  :disabled="loading"
+                  :disabled="loading || testingConnection"
                 >
+                  <span v-if="loading" class="btn-spinner"></span>
                   {{ loading ? '저장 중...' : (isNewProject ? '등록' : '저장') }}
                 </button>
               </div>
@@ -222,6 +251,7 @@
 </template>
 
 <script>
+import LoadingOverlay from '../components/layout/LoadingOverlay.vue'
 import {
   getProjects,
   getProject,
@@ -232,6 +262,7 @@ import {
 
 export default {
   name: 'SettingView',
+  components: { LoadingOverlay },
   props: {
     project: {
       type: Object,
@@ -246,8 +277,12 @@ export default {
       showForm: false,
       isNewProject: false,
       form: this.getEmptyForm(),
-      loading: false,
-      testingConnection: false,
+      listLoading: false,       // 프로젝트 목록 로딩
+      loading: false,           // 저장 중
+      testingConnection: false, // 연결 테스트 중
+      loadingOverlay: false,    // 전역 오버레이
+      loadingMessage: '처리 중...',
+      loadingSubMessage: '',
       message: { type: '', text: '' }
     }
   },
@@ -263,6 +298,7 @@ export default {
           host: '',
           port: 5432,
           db_name: '',
+          db_schema: '',
           user: '',
           pw: ''
         }
@@ -270,11 +306,14 @@ export default {
     },
 
     async loadProjects() {
+      this.listLoading = true
       try {
         const response = await getProjects()
         this.projects = response.projects || []
       } catch (error) {
         console.error('프로젝트 목록 조회 실패:', error)
+      } finally {
+        this.listLoading = false
       }
     },
 
@@ -291,20 +330,30 @@ export default {
       this.isNewProject = false
       this.message = { type: '', text: '' }
 
+      // 상세 조회 로딩 오버레이
+      this.loadingOverlay = true
+      this.loadingMessage = '프로젝트 정보 로딩 중...'
+      this.loadingSubMessage = 'DB에서 데이터를 가져오고 있습니다'
+
       try {
         const response = await getProject(projectId)
         this.form = {
           project_id: response.project_id,
           project_name: response.project_name,
           db_config: {
-            ...response.db_config,
+            host: response.db_config.host,
+            port: response.db_config.port,
+            db_name: response.db_config.db_name,
+            db_schema: response.db_config.db_schema || '',
+            user: response.db_config.user,
             pw: '' // 비밀번호는 빈값으로 (변경 시에만 입력)
           }
         }
         this.showForm = true
-        // 프로젝트 상세 보기만 하고, 선택은 버튼 클릭 시에만 수행
       } catch (error) {
         this.message = { type: 'error', text: error.message }
+      } finally {
+        this.loadingOverlay = false
       }
     },
 
@@ -337,6 +386,9 @@ export default {
 
     async handleSubmit() {
       this.loading = true
+      this.loadingOverlay = true
+      this.loadingMessage = this.isNewProject ? '프로젝트 등록 중...' : '프로젝트 저장 중...'
+      this.loadingSubMessage = 'DB에 연결하여 저장하고 있습니다'
       this.message = { type: '', text: '' }
 
       try {
@@ -351,12 +403,11 @@ export default {
           this.isNewProject = false
           this.selectedProjectId = this.form.project_id
         }
-
-        // 프로젝트 자동 선택하지 않음 - 사용자가 "이 프로젝트 사용하기" 버튼 클릭 필요
       } catch (error) {
         this.message = { type: 'error', text: error.message }
       } finally {
         this.loading = false
+        this.loadingOverlay = false
       }
     },
 
@@ -364,6 +415,10 @@ export default {
       if (!confirm(`'${projectId}' 프로젝트를 삭제하시겠습니까?`)) {
         return
       }
+
+      this.loadingOverlay = true
+      this.loadingMessage = '프로젝트 삭제 중...'
+      this.loadingSubMessage = ''
 
       try {
         await deleteProject(projectId)
@@ -386,6 +441,8 @@ export default {
         }
       } catch (error) {
         alert('삭제 실패: ' + error.message)
+      } finally {
+        this.loadingOverlay = false
       }
     },
 
@@ -444,6 +501,57 @@ export default {
   grid-template-columns: 300px 1fr;
   gap: 24px;
 }
+
+/* ─── 스켈레톤 로딩 ─── */
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-item {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+
+.skeleton-line.long  { width: 75%; }
+.skeleton-line.short { width: 45%; }
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─── 버튼 인라인 스피너 ─── */
+.btn-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+
 
 /* 프로젝트 목록 */
 .project-list-section {
@@ -660,6 +768,18 @@ export default {
 .form-input:disabled {
   background: #f5f5f5;
   color: #888;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.optional-label {
+  font-size: 11px;
+  color: #aaa;
+  font-weight: 400;
 }
 
 .message {

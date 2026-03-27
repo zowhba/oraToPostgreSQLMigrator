@@ -43,7 +43,7 @@ def create_project(req: ProjectCreateRequest) -> ProjectCreateResponse:
             """
             UPDATE projects
             SET project_name = %s, db_host = %s, db_port = %s,
-                db_name = %s, db_user = %s, db_pw = %s,
+                db_name = %s, db_schema = %s, db_user = %s, db_pw = %s,
                 updated_at = CURRENT_TIMESTAMP
             WHERE project_id = %s
             """,
@@ -52,6 +52,7 @@ def create_project(req: ProjectCreateRequest) -> ProjectCreateResponse:
                 req.db_config.host,
                 req.db_config.port,
                 req.db_config.db_name,
+                req.db_config.db_schema or None,
                 req.db_config.user,
                 req.db_config.pw,
                 req.project_id,
@@ -68,8 +69,8 @@ def create_project(req: ProjectCreateRequest) -> ProjectCreateResponse:
     # 신규 프로젝트 생성
     cur.execute(
         """
-        INSERT INTO projects (project_id, project_name, db_host, db_port, db_name, db_user, db_pw)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO projects (project_id, project_name, db_host, db_port, db_name, db_schema, db_user, db_pw)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             req.project_id,
@@ -77,6 +78,7 @@ def create_project(req: ProjectCreateRequest) -> ProjectCreateResponse:
             req.db_config.host,
             req.db_config.port,
             req.db_config.db_name,
+            req.db_config.db_schema or None,
             req.db_config.user,
             req.db_config.pw,
         ),
@@ -108,6 +110,7 @@ def get_project(project_id: str) -> Optional[dict]:
             host=row["db_host"],
             port=row["db_port"],
             db_name=row["db_name"],
+            db_schema=row.get("db_schema") or None,
             user=row["db_user"],
             pw=row["db_pw"],
         ),

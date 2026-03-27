@@ -19,6 +19,7 @@ def get_connection():
     if _conn is None or _conn.closed:
         if Config.APP_DB_URL:
             _conn = psycopg2.connect(Config.APP_DB_URL, connect_timeout=10)
+            logger.info("[AppDB] 연결 완료: %s", Config.APP_DB_URL.split('@')[-1].split('?')[0])
         else:
             _conn = psycopg2.connect(
                 host=Config.APP_DB_HOST,
@@ -28,11 +29,11 @@ def get_connection():
                 password=Config.APP_DB_PASSWORD,
                 connect_timeout=10,
             )
+            logger.info(
+                "[AppDB] 연결 완료: %s:%s/%s",
+                Config.APP_DB_HOST, Config.APP_DB_PORT, Config.APP_DB_NAME,
+            )
         _conn.autocommit = True
-        logger.info(
-            "[AppDB] 연결 완료: %s:%s/%s",
-            Config.APP_DB_HOST, Config.APP_DB_PORT, Config.APP_DB_NAME,
-        )
     return _conn
 
 
@@ -48,13 +49,18 @@ def init_tables():
             db_host      VARCHAR(200) NOT NULL,
             db_port      INTEGER      NOT NULL DEFAULT 5432,
             db_name      VARCHAR(200) NOT NULL,
+            db_schema    VARCHAR(128),
             db_user      VARCHAR(200) NOT NULL,
             db_pw        VARCHAR(500) NOT NULL,
             created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
+        )
+    """)
 
-        -- 변환 작업 마스터 테이블
+    # 기존 테이블에 db_schema 컬럼이 없을 경우 추가 (마이그레이션 보장)
+    cur.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS db_schema VARCHAR(128)")
+
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS conversions (
             conversion_id  SERIAL PRIMARY KEY,
             project_id     VARCHAR(100) REFERENCES projects(project_id) ON DELETE CASCADE,
@@ -64,9 +70,10 @@ def init_tables():
             l2_count       INTEGER DEFAULT 0,
             l3_count       INTEGER DEFAULT 0,
             created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        )
+    """)
 
-        -- 개별 쿼리 변환 상세 테이블
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS query_conversions (
             detail_id          SERIAL PRIMARY KEY,
             conversion_id      INTEGER REFERENCES conversions(conversion_id) ON DELETE CASCADE,
@@ -80,7 +87,7 @@ def init_tables():
             dry_run_result     JSONB,
             ai_guide_report    TEXT,
             created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        )
     """)
 
     cur.close()

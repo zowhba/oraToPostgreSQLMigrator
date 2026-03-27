@@ -42,6 +42,7 @@ async def get_project(project_id: str):
             "host": cfg.host,
             "port": cfg.port,
             "db_name": cfg.db_name,
+            "db_schema": cfg.db_schema or "",
             "user": cfg.user,
             "pw": "****",
         },
@@ -61,6 +62,5 @@ async def delete_project(project_id: str):
 async def test_connection(project_id: str):
     """DB 연결 테스트"""
     result = project_service.test_db_connection(project_id)
-    if result.status == "error" and not result.connected:
-        raise HTTPException(status_code=400, detail=result.message)
+    # 연결 성공/실패 모두 200으로 반환 (프론트에서 connected 필드로 판단)
     return result

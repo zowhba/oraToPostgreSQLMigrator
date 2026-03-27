@@ -193,8 +193,14 @@ export async function testConnection(projectId) {
     }
   }
 
-  const response = await api.post(`/projects/${projectId}/test-connection`)
-  return response.data
+  try {
+    const response = await api.post(`/projects/${projectId}/test-connection`)
+    return response.data
+  } catch (error) {
+    // HTTP 에러인 경우 실패 응답으로 변환
+    const detail = error?.response?.data?.detail || error.message || 'DB 연결 실패'
+    return { status: 'error', message: detail, connected: false }
+  }
 }
 
 // ============================================

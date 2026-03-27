@@ -57,8 +57,10 @@ class ConversionLogEntry(BaseModel):
 class DryRunResult(BaseModel):
     """DB 검증(Dry-run) 결과"""
     is_success: bool = Field(..., description="EXPLAIN 실행 성공 여부")
+    executed_sql: Optional[str] = Field(None, description="실제 Dry-run에 사용된 SQL (MyBatis 태그 제거 후)")
     explain_plan: Optional[str] = Field(None, description="성공 시 실행 계획")
-    error_message: Optional[str] = Field(None, description="실패 시 에러 메시지")
+    error_message: Optional[str] = Field(None, description="실패 시 에러 메시지 (raw)")
+    error_hint: Optional[str] = Field(None, description="실패 시 에러 원인 및 해결 방법 설명 (친절한 한국어)")
 
 
 class QueryResult(BaseModel):

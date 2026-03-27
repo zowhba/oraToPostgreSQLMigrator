@@ -27,9 +27,18 @@ logger = logging.getLogger(__name__)
 # DB 연결 불가 시 재사용하는 DryRunResult
 _DB_UNREACHABLE_RESULT = DryRunResult(
     is_success=False,
+    executed_sql=None,
     explain_plan=None,
     error_message="DB 연결 실패: 연결 사전 검증에서 접속 불가 확인됨",
+    error_hint=(
+        "📌 **원인**: 변환 시작 시 PostgreSQL 연결 사전 검증에서 실패하여 Dry-run을 건너뛰었습니다.\n\n"
+        "💡 **해결 방법**:\n"
+        "  - 설정 메뉴에서 DB 호스트, 포트, 계정 정보가 올바른지 확인하세요\n"
+        "  - DB 서버가 실행 중이고 네트워크 접근이 가능한지 확인하세요\n"
+        "  - 방화벽 또는 VPN 설정으로 인해 접속이 차단되었을 수 있습니다"
+    ),
 )
+
 
 
 def _test_db_connection(db_config: DBConfig) -> bool:

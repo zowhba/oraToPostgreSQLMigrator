@@ -113,7 +113,22 @@ async def log_request_response(request: Request, call_next):
     response = await call_next(request)
     elapsed = time.time() - start
 
-    # Response body 읽기
+    # 스트리밍 및 SSE 응답인 경우 본문 로깅 절대 금지 (버퍼링 방지)
+    # media_type 체크 외에 URL 경로로도 강력하게 필터링
+    is_streaming = (
+        "text/event-stream" in (response.media_type or "") or 
+        "application/x-ndjson" in (response.media_type or "") or
+        request.url.path.endswith("/convert-stream")
+    )
+    
+    if is_streaming:
+        logger.info(
+            "──── RESPONSE ──── [%d] %.1fs (Streaming Response - Body Logging Skipped | path=%s)",
+            response.status_code, elapsed, request.url.path
+        )
+        return response
+
+    # Response body 읽기 (일반 JSON 등 동기식 응답만 처리)
     resp_body_chunks = []
     async for chunk in response.body_iterator:
         resp_body_chunks.append(chunk if isinstance(chunk, bytes) else chunk.encode())
@@ -127,7 +142,7 @@ async def log_request_response(request: Request, call_next):
 
     logger.info(
         "──── RESPONSE ──── [%d] %.1fs\n%s",
-        response.status_code, elapsed, resp_body,
+        response.status_code, elapsed, _truncate(resp_body),
     )
 
     # body_iterator가 소비되었으므로 새 응답 생성

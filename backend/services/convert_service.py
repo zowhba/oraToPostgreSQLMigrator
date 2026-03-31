@@ -3,6 +3,8 @@
 LLM 변환 → Dry-run → Difficulty 분류의 전체 파이프라인
 """
 import logging
+import json
+import time
 from typing import Optional
 
 import psycopg2
@@ -40,7 +42,6 @@ _DB_UNREACHABLE_RESULT = DryRunResult(
 )
 
 
-
 def _test_db_connection(db_config: DBConfig) -> bool:
     """DB 연결 사전 검증 (1회만 수행)"""
     try:
@@ -50,7 +51,8 @@ def _test_db_connection(db_config: DBConfig) -> bool:
             dbname=db_config.db_name,
             user=db_config.user,
             password=db_config.pw,
-            connect_timeout=5,
+            connect_timeout=10,
+            sslmode='require'
         )
         conn.close()
         return True
@@ -61,95 +63,87 @@ def _test_db_connection(db_config: DBConfig) -> bool:
 
 def process_conversion(request: ConvertRequest) -> ConvertResponse:
     """
-    Interface B 메인 변환 파이프라인
-
-    1. project_id로 DB 접속정보 조회
-    2. DB 연결 사전 검증 (1회) — 실패 시 schema/dryrun 전체 스킵
-    3. 쿼리별 순차 처리:
-       a. schema_fetcher로 테이블 DDL 조회 (DB 가용 시)
-       b. llm_client로 LLM 변환 호출
-       c. LLM 응답 파싱
-       d. dryrun_service로 Dry-run 실행 (DB 가용 시)
-       e. difficulty_classifier로 Level 분류
-       f. QueryResult 조합
-    4. ConvertResponse 반환
+    기존 동기식 변환 파이프라인 (기타 서비스 호환용)
     """
-    # 1. DB 접속 정보 조회
-    db_config: Optional[DBConfig] = project_service.get_db_config(request.project_id)
-    if not db_config:
-        logger.error("[Convert] 프로젝트 '%s'를 찾을 수 없습니다.", request.project_id)
-        return ConvertResponse(
-            project_id=request.project_id,
-            queries=[
-                QueryResult(
-                    query_id=q.query_id,
-                    tag_name=q.tag_name,
-                    attributes=q.attributes,
-                    original_sql_xml=q.original_sql_xml,
-                    difficulty_level=3,
-                    converted_sql=q.original_sql_xml,
-                    conversion_log=[],
-                    dry_run_result=DryRunResult(
-                        is_success=False,
-                        error_message=f"프로젝트 '{request.project_id}'를 찾을 수 없습니다.",
-                    ),
-                    ai_guide_report=f"프로젝트 '{request.project_id}'가 등록되지 않았습니다. "
-                                    "먼저 Interface A를 통해 프로젝트를 등록하세요.",
-                )
-                for q in request.queries
-            ],
-        )
-
-    # 2. DB 연결 사전 검증 (1회)
-    db_reachable = _test_db_connection(db_config)
-    if db_reachable:
-        logger.info("[Convert] DB 연결 확인 완료 (%s:%d/%s)", db_config.host, db_config.port, db_config.db_name)
-    else:
-        logger.warning(
-            "[Convert] DB 연결 불가 — schema 조회 및 dry-run을 건너뜁니다. "
-            "LLM 변환만 수행합니다."
-        )
-
-    logger.info(
-        "[Convert] 시작 — project=%s, file=%s, queries=%d, db_reachable=%s",
-        request.project_id,
-        request.xml_file_name,
-        len(request.queries),
-        db_reachable,
+    total = len(request.queries)
+    results = []
+    
+    # stream_conversion 제네레이터를 활용하여 로직 중복 제거
+    for item in stream_conversion(request):
+        if item["type"] == "complete":
+            return ConvertResponse(**item["final_response"])
+            
+    # 위에서 return되지 않는 경우 (이론상 발생 불가)
+    return ConvertResponse(
+        project_id=request.project_id,
+        xml_file_name=request.xml_file_name,
+        queries=[],
     )
 
+
+def stream_conversion(request: ConvertRequest):
+    """
+    Interface B 실시간 스트리밍 변환 파이프라인
+    진행 상태와 개별 쿼리 결과를 yield 합니다.
+    """
+    db_config: Optional[DBConfig] = project_service.get_db_config(request.project_id)
+    total_queries = len(request.queries)
+    start_time = time.time()
+    
+    logger.info("[Convert] 시작 — project=%s, file=%s, queries=%d", request.project_id, request.xml_file_name, total_queries)
+
+    yield {
+        "type": "progress",
+        "current": 0.1,
+        "total": total_queries,
+        "message": "데이터베이스 연결 확인 중...",
+        "estimated_seconds": total_queries * 6
+    }
+
+    db_reachable = False
+    if db_config:
+        db_reachable = _test_db_connection(db_config)
+    
     results: list[QueryResult] = []
 
     # 3. 쿼리별 순차 처리
     for idx, query in enumerate(request.queries, 1):
-        logger.info(
-            "[Convert] [%d/%d] query_id=%s, tag=%s",
-            idx, len(request.queries), query.query_id, query.tag_name,
-        )
-
+        # 3a. DDL 스키마 조회 단계
+        yield {
+            "type": "progress",
+            "current": idx - 0.8,
+            "total": total_queries,
+            "message": f"[{idx}/{total_queries}] 스키마 분석 중: {query.query_id}",
+            "estimated_seconds": (total_queries - idx + 1) * 6
+        }
+        
         try:
-            # 3a. DDL 스키마 조회 (DB 가용 시만)
+            schema_context = ""
             if db_reachable:
                 schema_context = schema_fetcher.fetch_schema_context(
                     db_config, query.original_sql_xml
                 )
-            else:
-                schema_context = ""
 
-            # 3b. LLM 변환 호출
+            # 3b. LLM 변환 호출 단계
+            yield {
+                "type": "progress",
+                "current": idx - 0.5,
+                "total": total_queries,
+                "message": f"[{idx}/{total_queries}] AI 변환 수행 중: {query.query_id}",
+                "estimated_seconds": (total_queries - idx + 1) * 6 - 2
+            }
+            
             llm_response = llm_client.convert_query(
                 original_sql_xml=query.original_sql_xml,
                 schema_context=schema_context,
                 tag_name=query.tag_name,
             )
 
-            # 3c. LLM 응답 파싱
             converted_sql = llm_response.get("converted_sql", query.original_sql_xml)
             conversion_log_raw = llm_response.get("conversion_log", [])
             difficulty_assessment = llm_response.get("difficulty_assessment", {})
             ai_guide_report = llm_response.get("ai_guide_report", "")
 
-            # conversion_log를 Pydantic 모델로 변환
             conversion_log = [
                 ConversionLogEntry(
                     category=log.get("category", "SYNTAX"),
@@ -160,20 +154,26 @@ def process_conversion(request: ConvertRequest) -> ConvertResponse:
                 if isinstance(log, dict)
             ]
 
-            # 3d. Dry-run 실행 (DB 가용 시만)
+            # 3c. Dry-run 실행 단계
+            yield {
+                "type": "progress",
+                "current": idx - 0.2,
+                "total": total_queries,
+                "message": f"[{idx}/{total_queries}] Dry-run 검증 중: {query.query_id}",
+                "estimated_seconds": (total_queries - idx + 1) * 6 - 4
+            }
+            
             if db_reachable:
                 dry_run_result = dryrun_service.execute_dry_run(db_config, converted_sql)
             else:
                 dry_run_result = _DB_UNREACHABLE_RESULT
 
-            # 3e. Difficulty Level 분류
             difficulty_level = classify_difficulty(
                 dry_run_result=dry_run_result,
                 llm_assessment=difficulty_assessment,
                 conversion_log=conversion_log_raw,
             )
 
-            # 3f. QueryResult 조합
             result = QueryResult(
                 query_id=query.query_id,
                 tag_name=query.tag_name,
@@ -187,11 +187,7 @@ def process_conversion(request: ConvertRequest) -> ConvertResponse:
             )
 
         except Exception as e:
-            # 개별 쿼리 처리 실패 → Level 3, 나머지 계속
-            logger.error(
-                "[Convert] query_id=%s 처리 실패: %s",
-                query.query_id, str(e),
-            )
+            logger.error("[Convert] query_id=%s 처리 실패: %s", query.query_id, str(e))
             result = QueryResult(
                 query_id=query.query_id,
                 tag_name=query.tag_name,
@@ -204,27 +200,39 @@ def process_conversion(request: ConvertRequest) -> ConvertResponse:
                     is_success=False,
                     error_message=f"변환 처리 중 오류: {str(e)}",
                 ),
-                ai_guide_report=f"변환 중 시스템 오류가 발생했습니다: {str(e)}. 수동 변환이 필요합니다.",
+                ai_guide_report=f"변환 중 시스템 오류가 발생했습니다: {str(e)}",
             )
 
         results.append(result)
+        
+        # 개별 결과 완료 전송
+        yield {
+            "type": "progress",
+            "current": idx,
+            "total": total_queries,
+            "message": f"[{idx}/{total_queries}] 변환 완료: {query.query_id}",
+            "estimated_seconds": (total_queries - idx) * 6
+        }
+        
+        yield {
+            "type": "query_result",
+            "query_id": query.query_id,
+            "data": result.dict()
+        }
 
-    logger.info(
-        "[Convert] 완료 — 총 %d건 (L1=%d, L2=%d, L3=%d)",
-        len(results),
-        sum(1 for r in results if r.difficulty_level == 1),
-        sum(1 for r in results if r.difficulty_level == 2),
-        sum(1 for r in results if r.difficulty_level == 3),
-    )
+    # 최종 완료
+    end_time = time.time()
+    duration = round(end_time - start_time, 2)
 
     response = ConvertResponse(
         project_id=request.project_id,
         xml_file_name=request.xml_file_name,
+        duration_seconds=duration,
         queries=results,
     )
-
-    # 4. 변환 히스토리 DB 저장 (영속화)
     history_service.save_conversion_history(request, response)
-
-    return response
-
+    
+    yield {
+        "type": "complete",
+        "final_response": response.dict()
+    }

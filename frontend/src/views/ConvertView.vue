@@ -16,39 +16,45 @@
         :disabled="!project.project_id"
       />
 
-      <!-- 최근 작업 파일 (옵션 3) -->
-      <div class="recent-files" v-if="recentHistory.length > 0 && !fileName">
-        <h4 class="recent-title">최근 작업 파일</h4>
-        <div class="recent-list">
-          <div
-            v-for="item in recentHistory"
-            :key="item.id"
-            class="recent-item"
-            @click="loadFromHistory(item)"
-          >
-            <span class="recent-icon">&#128196;</span>
-            <div class="recent-info">
-              <span class="recent-name">{{ item.fileName }}</span>
-              <span class="recent-meta">
-                {{ formatDate(item.uploadedAt) }} | {{ item.queryCount }}개 쿼리
-              </span>
-            </div>
-            <span class="recent-arrow">&#8594;</span>
-          </div>
-        </div>
+      />
+    </div>
+
+    <!-- 변환 버튼 및 상태 -->
+    <div class="action-bar" v-if="queries.length > 0">
+      <span class="query-count">{{ queries.length }}개 쿼리 발견</span>
+      <div class="action-right" v-if="!loading && results.length === 0">
+        <button
+          class="btn btn-primary"
+          @click="handleConvert"
+        >
+          변환하기
+        </button>
       </div>
     </div>
 
-    <!-- 변환 버튼 -->
-    <div class="action-bar" v-if="queries.length > 0">
-      <span class="query-count">{{ queries.length }}개 쿼리 발견</span>
-      <button
-        class="btn btn-primary"
-        @click="handleConvert"
-        :disabled="loading"
-      >
-        {{ loading ? '변환 중...' : '변환하기' }}
-      </button>
+    <!-- 변환 로딩/진행 상태 -->
+    <div class="section-card progress-section" v-if="loading">
+      <div class="progress-header">
+        <div class="status-info">
+          <span class="spinner-small"></span>
+          <span class="status-msg">{{ statusMessage }}</span>
+        </div>
+        <div class="eta-info" v-if="estimatedTime > 0">
+          남은 예상 시간: <strong>{{ Math.ceil(estimatedTime) }}초</strong>
+        </div>
+      </div>
+      
+      <div class="progress-container">
+        <div class="progress-bar-bg">
+          <div 
+            class="progress-bar-fill" 
+            :style="{ width: `${progress}%` }"
+          ></div>
+        </div>
+        <span class="progress-percent">{{ progress }}%</span>
+      </div>
+      
+      <p class="progress-hint">대량의 쿼리 변환 시 수 분이 소요될 수 있습니다. 창을 닫지 마세요.</p>
     </div>
 
     <!-- 결과 테이블 -->
@@ -81,14 +87,8 @@
 import FileUpload from '../components/convert/FileUpload.vue'
 import QueryTable from '../components/convert/QueryTable.vue'
 import QueryDetail from '../components/convert/QueryDetail.vue'
-import { convertQueries } from '../api/index.js'
+import { convertQueriesStream, getHistoryDetail } from '../api/index.js'
 import * as XLSX from 'xlsx'
-import {
-  getRecentHistory,
-  getHistoryById,
-  saveHistory,
-  formatDate
-} from '../utils/historyStorage.js'
 
 export default {
   name: 'ConvertView',
@@ -111,39 +111,45 @@ export default {
       results: [],
       selectedQuery: null,
       loading: false,
-      recentHistory: []
+      progress: 0,
+      statusMessage: '',
+      estimatedTime: 0
     }
   },
   mounted() {
-    this.loadRecentHistory()
     this.checkHistoryParam()
   },
   methods: {
-    loadRecentHistory() {
-      this.recentHistory = getRecentHistory(3)
-    },
-
-    checkHistoryParam() {
+    async checkHistoryParam() {
       const historyId = this.$route.query.historyId
       if (historyId) {
-        const history = getHistoryById(historyId)
-        if (history) {
-          this.loadFromHistory(history)
+        this.loading = true
+        this.statusMessage = '과거 작업 히스토리를 불러오는 중...'
+        try {
+          const response = await getHistoryDetail(historyId)
+          if (response.status === 'success') {
+            this.loadFromHistory(response.data)
+          }
+        } catch (error) {
+          console.error('History fetch error:', error)
+          alert('히스토리 정보를 불러오지 못했습니다.')
+        } finally {
+          this.loading = false
+          // URL에서 파라미터 제거
+          this.$router.replace({ path: '/convert' })
         }
-        // URL에서 파라미터 제거
-        this.$router.replace({ path: '/convert' })
       }
     },
 
-    formatDate(isoString) {
-      return formatDate(isoString)
-    },
-
-    loadFromHistory(item) {
-      this.fileName = item.fileName
-      this.namespace = item.namespace
-      this.queries = item.queries || []
-      this.results = item.results || []
+    loadFromHistory(data) {
+      this.fileName = data.xml_file_name
+      this.namespace = data.project_id // namespace 대신 project_id로 저장되어 있으므로 적절히 대응
+      this.queries = data.queries.map(q => ({
+        query_id: q.query_id,
+        tag_name: q.tag_name,
+        original_sql_xml: q.original_sql_xml
+      }))
+      this.results = data.queries
       this.selectedQuery = null
     },
 
@@ -159,6 +165,10 @@ export default {
       if (this.queries.length === 0) return
 
       this.loading = true
+      this.progress = 0
+      this.statusMessage = '변환 준비 중...'
+      this.estimatedTime = this.queries.length * 5 // 초기 예상
+      this.results = [] // 시작 시 결과 초기화
 
       try {
         const requestData = {
@@ -169,24 +179,28 @@ export default {
           queries: this.queries
         }
 
-        const response = await convertQueries(requestData)
-        this.results = response.queries || []
-
-        // 히스토리에 저장
-        saveHistory({
-          fileName: this.fileName,
-          namespace: this.namespace,
-          queries: this.queries,
-          results: this.results
+        // 스트리밍 호출
+        await convertQueriesStream(requestData, (chunk) => {
+          if (chunk.type === 'progress') {
+            this.statusMessage = chunk.message
+            this.progress = Math.round((chunk.current / chunk.total) * 100)
+            this.estimatedTime = chunk.estimated_seconds || 0
+          } else if (chunk.type === 'query_result') {
+            // 개별 결과가 올 때마다 순차적으로 push (실시간 테이블 업데이트)
+            this.results.push(chunk.data)
+          } else if (chunk.type === 'complete') {
+            this.progress = 100
+            this.statusMessage = '변환이 완료되었습니다.'
+          }
         })
 
-        // 최근 히스토리 새로고침
-        this.loadRecentHistory()
-
       } catch (error) {
+        console.error('Conversion Failed:', error)
         alert('변환 중 오류가 발생했습니다: ' + error.message)
       } finally {
-        this.loading = false
+        setTimeout(() => {
+           this.loading = false
+        }, 800) // 완료 메시지 잠깐 보여주기
       }
     },
 
@@ -413,5 +427,111 @@ export default {
 
 .btn-secondary:hover {
   background: #e0e0e0;
+}
+
+/* ─── 진행 상태 UI ─── */
+.progress-section {
+  border-left: 4px solid #667eea;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.status-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.spinner-small {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #e2e8f0;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.status-msg {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a202c;
+}
+
+.eta-info {
+  font-size: 13px;
+  color: #718096;
+  background: #f7fafc;
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid #edf2f7;
+}
+
+.progress-container {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 12px;
+}
+
+.progress-bar-bg {
+  flex: 1;
+  height: 12px;
+  background: #edf2f7;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  border-radius: 6px;
+  transition: width 0.4s ease-out;
+  position: relative;
+}
+
+.progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0) 0%,
+    rgba(255,255,255,0.3) 50%,
+    rgba(255,255,255,0) 100%
+  );
+  animation: shine 1.5s infinite;
+}
+
+@keyframes shine {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+.progress-percent {
+  font-size: 14px;
+  font-weight: 700;
+  color: #4a5568;
+  min-width: 40px;
+}
+
+.progress-hint {
+  font-size: 12px;
+  color: #a0aec0;
+  margin: 0;
 }
 </style>

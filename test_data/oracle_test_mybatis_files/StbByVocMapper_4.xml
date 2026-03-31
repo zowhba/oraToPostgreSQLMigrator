@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.dashboard.StbByVocMapper">
+
+	<select id="selectListStbByVocVer" parameterType="com.skb.edmp.admin.dto.dashboard.DmVocStatTotDTO" resultType="com.skb.edmp.admin.dto.dashboard.DmVocStatTotDTO">
+		SELECT
+			dvst.*,
+			(
+			SELECT
+				nvl(cd_nm, '')|| '(' || dvst.modl_nm || ')'
+			FROM
+				ad_comm_cd
+			WHERE
+				comm_grp_cd = 'MODL_FG_CD'
+				AND comm_cd = (
+				SELECT
+					modl_fg_cd
+				FROM
+					dm_dvc_modl_mst
+				WHERE
+					modl_cd = dvst.modl_cd)) modl_fg_nm,
+			round((dvst.voc_to_qty + dvst.voc_wat_qty), 1) voc_total_qty,
+			round((dvst.user_to_qty + dvst.user_wat_qty), 1) user_total_qty,
+			nvl(to_char(dvst.voc_to_qty / NULLIF(dvst.user_to_qty, 0)* 1000), 'N/A') voc_per_user_to_qty,
+			nvl(to_char(dvst.voc_wat_qty / NULLIF(dvst.user_wat_qty, 0)* 1000), 'N/A') voc_per_user_wat_qty,
+			nvl(to_char(dvst.voc_to_qty / NULLIF(dvst.user_to_qty, 0) * 1000 - dvst.voc_wat_qty / NULLIF(dvst.user_wat_qty, 0) * 1000), 'N/A') voc_gap,
+			nvl(to_char((dvst.voc_to_qty + dvst.voc_wat_qty) / NULLIF(dvst.user_to_qty + dvst.user_wat_qty, 0) * 1000), 'N/A') voc_avg,
+			nvl(to_char(dvst.user_to_qty * 100 / NULLIF(dvst.user_to_qty + dvst.user_wat_qty, 0)), 'N/A') user_per_total_to_qty
+		FROM
+			(
+			SELECT
+				modl_cd,
+				(
+				SELECT
+					model_name
+				FROM
+					stb_model
+				WHERE
+					model_code = modl_cd) modl_nm,
+				stb_sw_plan_last_ver,
+				sum(voc_to_qty) voc_to_qty,
+				sum(voc_wat_qty) voc_wat_qty,
+				sum(user_to_qty) user_to_qty,
+				sum(user_wat_qty) user_wat_qty,
+				voc_exe_dt
+			FROM
+				dm_voc_stat_tot
+			WHERE
+				1 = 1
+				AND (modl_cd,
+				stb_sw_plan_last_ver,
+				voc_cnsl_strd_fr_dt,
+				voc_cnsl_strd_to_dt,
+				voc_exe_dt,
+				scrbr_typ_cd) IN (
+					SELECT
+						modl_cd,
+						stb_sw_plan_last_ver,
+						voc_cnsl_strd_fr_dt,
+						voc_cnsl_strd_to_dt,
+						max(voc_exe_dt),
+						scrbr_typ_cd
+					FROM
+						dm_voc_stat_tot
+					WHERE
+						voc_cnsl_strd_fr_dt = to_date(#{vocFrDtStr}, 'YYYY.MM.DD HH24:MI:SS')
+						AND voc_cnsl_strd_to_dt = to_date(#{vocToDtStr}, 'YYYY.MM.DD HH24:MI:SS')
+						<if test='scrbrTypCd != null and !scrbrTypCd.equals("0")'>
+							AND scrbr_typ_cd = #{scrbrTypCd}
+						</if>
+					GROUP BY
+						modl_cd,
+						stb_sw_plan_last_ver,
+						voc_cnsl_strd_fr_dt,
+						voc_cnsl_strd_to_dt,
+						scrbr_typ_cd)
+				GROUP BY
+					modl_cd,
+					stb_sw_plan_last_ver,
+					voc_cnsl_strd_fr_dt,
+					voc_cnsl_strd_to_dt,
+					voc_exe_dt) dvst
+				ORDER BY dvst.modl_nm, dvst.stb_sw_plan_last_ver
+
+	</select>
+
+	<select id="selectListStbByVocTypModlNm" parameterType="com.skb.edmp.admin.dto.dashboard.DmVocStatDtlDTO" resultType="com.skb.edmp.admin.dto.dashboard.DmVocStatDtlDTO">
+		SELECT
+			dvst.*,
+			(
+			SELECT
+				nvl(cd_nm, '')|| '(' || dvst.modl_nm || ')'
+			FROM
+				ad_comm_cd
+			WHERE
+				comm_grp_cd = 'MODL_FG_CD'
+				AND comm_cd = (
+				SELECT
+					modl_fg_cd
+				FROM
+					dm_dvc_modl_mst
+				WHERE
+					modl_cd = dvst.modl_cd)) modl_fg_nm
+		FROM
+			(
+			SELECT
+				modl_cd,
+				(
+				SELECT
+					model_name
+				FROM
+					stb_model
+				WHERE
+					model_code = modl_cd) modl_nm,
+				stb_sw_plan_last_ver
+			FROM
+				dm_voc_stat_dtl
+			WHERE
+				(modl_cd,
+				stb_sw_plan_last_ver,
+				voc_cnsl_strd_fr_dt,
+				voc_cnsl_strd_to_dt,
+				voc_exe_dt,
+				scrbr_typ_cd) IN (
+				SELECT
+					modl_cd,
+					stb_sw_plan_last_ver,
+					voc_cnsl_strd_fr_dt,
+					voc_cnsl_strd_to_dt,
+					max(voc_exe_dt),
+					scrbr_typ_cd
+				FROM
+					dm_voc_stat_dtl
+				WHERE
+					voc_cnsl_strd_fr_dt = to_date(#{vocFrDtStr}, 'YYYY.MM.DD HH24:MI:SS')
+					AND voc_cnsl_strd_to_dt = to_date(#{vocToDtStr}, 'YYYY.MM.DD HH24:MI:SS')
+					<if test='scrbrTypCd != null and !scrbrTypCd.equals("0")'>
+						AND scrbr_typ_cd = #{scrbrTypCd}
+					</if>
+				GROUP BY
+					modl_cd,
+					stb_sw_plan_last_ver,
+					voc_cnsl_strd_fr_dt,
+					voc_cnsl_strd_to_dt,
+					scrbr_typ_cd)
+			GROUP BY
+				modl_cd,
+				stb_sw_plan_last_ver,
+				voc_cnsl_strd_fr_dt,
+				voc_cnsl_strd_to_dt,
+				voc_exe_dt) dvst
+		ORDER BY
+			modl_cd,
+			stb_sw_plan_last_ver
+	</select>
+
+	<select id="selectListStbByVocTyp" parameterType="com.skb.edmp.admin.dto.dashboard.DmVocStatDtlDTO" resultType="com.skb.edmp.admin.dto.dashboard.DmVocStatDtlDTO">
+		SELECT
+			vocgrp.*,
+			nvl(to_char(vocgrp.TYP_CNSL_QTY * 1000 / NULLIF(vocgrp.user_to_qty, 0)), 'N/A') typ_cnsl_qty_per
+		FROM
+			(
+			SELECT
+				dvsd.modl_cd,
+				dvsd.typ_cnsl_cd_nm,
+				dvsd.stb_sw_plan_last_ver,
+				sum(dvsd.typ_cnsl_qty) typ_cnsl_qty,
+				sum(dvst.user_to_qty) user_to_qty
+			FROM
+				dm_voc_stat_dtl dvsd,
+				dm_voc_stat_tot dvst
+			WHERE
+				dvst.modl_cd = dvsd.MODL_CD
+				AND dvst.stb_sw_plan_last_ver = dvsd.STB_SW_PLAN_LAST_VER
+				AND dvst.VOC_CNSL_STRD_FR_DT = dvsd.VOC_CNSL_STRD_FR_DT
+				AND dvst.VOC_CNSL_STRD_TO_DT = dvsd.VOC_CNSL_STRD_TO_DT
+				AND dvst.voc_exe_dt = dvsd.voc_exe_dt
+      			AND dvst.scrbr_typ_cd = dvsd.scrbr_typ_cd 
+				AND (dvsd.modl_cd,
+				dvsd.stb_sw_plan_last_ver,
+				dvsd.voc_cnsl_strd_fr_dt,
+				dvsd.voc_cnsl_strd_to_dt,
+				dvsd.voc_exe_dt,
+				dvsd.scrbr_typ_cd) IN (
+				SELECT
+					modl_cd,
+					stb_sw_plan_last_ver,
+					voc_cnsl_strd_fr_dt,
+					voc_cnsl_strd_to_dt,
+					max(voc_exe_dt),
+					scrbr_typ_cd
+				FROM
+					dm_voc_stat_dtl
+				WHERE
+					voc_cnsl_strd_fr_dt = to_date(#{vocFrDtStr}, 'YYYY.MM.DD HH24:MI:SS')
+					AND voc_cnsl_strd_to_dt = to_date(#{vocToDtStr}, 'YYYY.MM.DD HH24:MI:SS')
+					<if test='scrbrTypCd != null and !scrbrTypCd.equals("0")'>
+						AND scrbr_typ_cd = #{scrbrTypCd}
+					</if>
+				GROUP BY
+					modl_cd,
+					stb_sw_plan_last_ver,
+					voc_cnsl_strd_fr_dt,
+					voc_cnsl_strd_to_dt,
+					scrbr_typ_cd)
+			GROUP BY
+				dvsd.typ_cnsl_cd_nm,
+				dvsd.modl_cd,
+				dvsd.stb_sw_plan_last_ver) vocgrp
+		ORDER BY
+			vocgrp.typ_cnsl_cd_nm,
+			vocgrp.modl_cd,
+			vocgrp.stb_sw_plan_last_ver
+	</select>
+
+	<select id="selectListStbByVocTypTot" parameterType="com.skb.edmp.admin.dto.dashboard.DmVocStatDtlDTO" resultType="com.skb.edmp.admin.dto.dashboard.DmVocStatDtlDTO">
+		SELECT
+			dvsd.TYP_CNSL_CD_NM,
+			sum(dvsd.typ_cnsl_qty) typ_cnsl_qty_sum,
+			nvl(to_char(sum(dvsd.typ_cnsl_qty) * 1000 / NULLIF(sum(dvst.user_to_qty), 0)), 'N/A') typ_cnsl_qty_per_sum
+		FROM
+			dm_voc_stat_dtl dvsd,
+			dm_voc_stat_tot dvst,
+			stb_model sm
+		WHERE
+			dvsd.modl_cd = sm.model_code
+			AND dvst.modl_cd = dvsd.modl_cd
+			AND dvst.stb_sw_plan_last_ver = dvsd.stb_sw_plan_last_ver
+			AND dvst.VOC_CNSL_STRD_FR_DT = dvsd.VOC_CNSL_STRD_FR_DT
+			AND dvst.VOC_CNSL_STRD_TO_DT = dvsd.VOC_CNSL_STRD_TO_DT
+			AND dvst.voc_exe_dt = dvsd.voc_exe_dt
+      		AND dvst.scrbr_typ_cd = dvsd.scrbr_typ_cd
+			AND (dvsd.modl_cd,
+			dvsd.stb_sw_plan_last_ver,
+			dvsd.voc_cnsl_strd_fr_dt,
+			dvsd.voc_cnsl_strd_to_dt,
+			dvsd.voc_exe_dt,
+			dvsd.scrbr_typ_cd) IN (
+			SELECT
+				modl_cd,
+				stb_sw_plan_last_ver,
+				voc_cnsl_strd_fr_dt,
+				voc_cnsl_strd_to_dt,
+				max(voc_exe_dt),
+				scrbr_typ_cd
+			FROM
+				dm_voc_stat_dtl
+			WHERE
+				voc_cnsl_strd_fr_dt = to_date(#{vocFrDtStr}, 'YYYY.MM.DD HH24:MI:SS')
+				AND voc_cnsl_strd_to_dt = to_date(#{vocToDtStr}, 'YYYY.MM.DD HH24:MI:SS')
+				<if test='scrbrTypCd != null and !scrbrTypCd.equals("0")'>
+					AND scrbr_typ_cd = #{scrbrTypCd}
+				</if>
+			GROUP BY
+				modl_cd,
+				stb_sw_plan_last_ver,
+				voc_cnsl_strd_fr_dt,
+				voc_cnsl_strd_to_dt,
+				scrbr_typ_cd)
+		GROUP BY
+			dvsd.typ_cnsl_cd_nm
+		ORDER BY
+			dvsd.TYP_CNSL_CD_NM
+	</select>
+</mapper>

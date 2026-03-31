@@ -16,9 +16,18 @@ _conn = None
 def get_connection():
     """앱 DB 커넥션을 반환합니다 (lazy singleton)."""
     global _conn
+    
+    # 기존 커넥션이 있다면 상태 체크 (재사용 전 검증)
+    if _conn is not None and not _conn.closed:
+        try:
+            with _conn.cursor() as tmp_cur:
+                tmp_cur.execute("SELECT 1")
+        except Exception:
+            _conn = None  # 연결 유실됨 (재설정 유도)
+            
     if _conn is None or _conn.closed:
         if Config.APP_DB_URL:
-            _conn = psycopg2.connect(Config.APP_DB_URL, connect_timeout=10)
+            _conn = psycopg2.connect(Config.APP_DB_URL, connect_timeout=10, sslmode='require')
             logger.info("[AppDB] 연결 완료: %s", Config.APP_DB_URL.split('@')[-1].split('?')[0])
         else:
             _conn = psycopg2.connect(
@@ -28,12 +37,18 @@ def get_connection():
                 user=Config.APP_DB_USER,
                 password=Config.APP_DB_PASSWORD,
                 connect_timeout=10,
+                sslmode='require'
             )
             logger.info(
                 "[AppDB] 연결 완료: %s:%s/%s",
                 Config.APP_DB_HOST, Config.APP_DB_PORT, Config.APP_DB_NAME,
             )
         _conn.autocommit = True
+        
+        # 스키마 검색 경로 설정 (public이 누락되지 않도록 강제)
+        with _conn.cursor() as cur:
+            cur.execute("SET search_path TO public, hanarocms, edmp")
+            
     return _conn
 
 
@@ -69,9 +84,13 @@ def init_tables():
             l1_count       INTEGER DEFAULT 0,
             l2_count       INTEGER DEFAULT 0,
             l3_count       INTEGER DEFAULT 0,
+            duration_seconds FLOAT DEFAULT 0,
             created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # 기존 테이블 마이그레이션
+    cur.execute("ALTER TABLE conversions ADD COLUMN IF NOT EXISTS duration_seconds FLOAT DEFAULT 0")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS query_conversions (

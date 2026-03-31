@@ -1,0 +1,305 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.admin.RoleAutrMgmt">
+
+    <select id="selectListRole"
+               parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO">
+    <![CDATA[
+       SELECT    amst.autr_nm
+		         ,amst.autr_id 
+		         ,(SELECT COUNT(*) FROM ad_user_mst umst ,ad_user_autr_map amap WHERE amap.autr_id = amst.autr_id AND umst.user_id(+) = amap.user_id AND  umst.DEL_YN = 'N' AND umst.USE_YN = 'Y') as userCnt
+		         ,TO_CHAR((SELECT stm_fir_reg_date from AD_AUTR_MST where autr_id = amst.autr_id),'YYYY-MM-DD') as stm_fir_reg_date
+	  FROM ad_autr_mst amst  
+	  WHERE 1=1 
+	  AND amst.DEL_YN = 'N'
+	  AND amst.USE_YN = 'Y'
+	  ORDER BY  amst.stm_last_upd_date desc
+    ]]>
+
+   </select>
+    <select id="selectListUser"
+               parameterType="com.skb.edmp.admin.dto.admin.RoleAutrUserDTO"
+               resultType="com.skb.edmp.admin.dto.admin.RoleAutrUserDTO">
+    <![CDATA[
+        SELECT
+                usr.user_id
+              , usr.user_nm
+              , usr.use_yn
+              , amap.autr_id
+              , co.comm_cd   AS user_co_cd
+              , co.cd_nm     AS user_co_nm
+        FROM
+                    ad_user_mst usr
+                   ,(
+                        SELECT
+                            cd.comm_grp_cd,
+                            cd.comm_cd,
+                            cd.cd_nm
+                        FROM
+                            ad_comm_grp_cd   grp,
+                            ad_comm_cd       cd
+                        WHERE
+                            grp.comm_grp_cd = 'USER_CO_FG_CD'
+                            AND grp.comm_grp_cd = cd.comm_grp_cd
+                    ) co
+                  ,ad_autr_mst autr
+                  ,ad_user_autr_map amap
+        WHERE usr.user_co_fg_cd = co.comm_cd (+)
+        AND usr.user_id = amap.user_id
+        AND autr.autr_id = #{autrId}
+        AND usr.del_yn = 'N'
+		AND usr.use_yn = 'Y'
+		AND autr.del_yn = 'N'
+		AND autr.use_yn = 'Y'
+        AND autr.autr_id = amap.autr_id
+        AND usr.del_yn = 'N'
+      ]]>
+    </select>
+
+    <select id="selectListRUser"
+                 parameterType="com.skb.edmp.admin.dto.admin.RoleAutrUserDTO"
+                 resultType="com.skb.edmp.admin.dto.admin.RoleAutrUserDTO">
+    <![CDATA[
+        SELECT   umst.user_id
+                   , umst.user_nm
+                   , umst.use_yn
+                   , co.cd_nm AS user_co_nm
+         FROM   ad_user_mst umst
+                 ,( SELECT cd.comm_grp_cd
+                             , cd.comm_cd
+                             , cd.cd_nm
+                       FROM ad_comm_grp_cd grp, ad_comm_cd cd
+                       WHERE grp.comm_grp_cd = 'USER_CO_FG_CD'
+                       AND grp.comm_grp_cd = cd.comm_grp_cd
+                 ) co
+        WHERE umst.user_co_fg_cd = co.comm_cd (+)
+        AND umst.user_id not in (SELECT usr.user_id
+				                          FROM ad_user_mst usr
+					                              ,ad_autr_mst autr
+					                              ,ad_user_autr_map amap
+				                          WHERE usr.user_id = amap.user_id
+				                          AND  autr.autr_id  = #{autrId}
+				                          AND autr.autr_id  = amap.autr_id
+				                          AND usr.del_yn = 'N'
+				                          AND usr.use_yn = 'Y')
+	   AND umst.del_yn = 'N'
+	   AND umst.use_yn = 'Y'
+    ]]>
+     <if test="userId != null and userId != '' "> 
+        AND umst.user_id = #{userId}
+     </if>
+     <if test="userNm != null and userNm != '' ">
+        AND UPPER(umst.user_nm)   LIKE '%' || UPPER(#{userNm}) || '%' 
+     </if>
+    </select>
+
+    <insert  id="insertAutr" parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO">
+     <![CDATA[
+        INSERT INTO ad_autr_mst (
+                autr_id
+              , autr_nm
+              , autr_fg_cd
+              , autr_expl
+              , del_yn
+              , use_yn
+              , stm_fir_reg_date
+              , stm_fir_reg_user_id
+              , stm_last_upd_date
+              , stm_last_upd_user_id
+            ) VALUES (
+                #{autrId}
+             ,  #{autrNm}
+             ,  '1'
+             ,  #{autrExpl}
+             ,  'N'
+             ,  'Y'
+             ,  SYSDATE
+             ,  #{regId}
+             ,  SYSDATE
+             ,  #{regId}
+            )
+     ]]>
+    </insert>
+
+    <insert  id="insertUserAutr" parameterType="com.skb.edmp.admin.dto.admin.RoleAutrUserDTO">
+    <![CDATA[
+        INSERT INTO ad_user_autr_map(
+               user_id
+             , autr_id
+             , stm_fir_reg_date
+             , stm_fir_reg_user_id
+             , stm_last_upd_date
+             , stm_last_upd_user_id
+        ) VALUES (
+              #{userId}
+             ,#{autrId}
+             ,SYSDATE
+             ,#{regId}
+             ,SYSDATE
+             ,#{regId}
+        )
+     ]]>
+    </insert>
+
+      <insert  id="insertAutrMenu" parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO">
+      <![CDATA[
+            INSERT INTO ad_autr_menu_map(
+                   autr_id
+                 , menu_id
+                 , stm_fir_reg_date
+                 , stm_fir_reg_user_id
+                 , stm_last_upd_date
+                 , stm_last_upd_user_id
+            ) VALUES (
+                  #{autrId}
+                 ,#{menuId}
+                 ,SYSDATE
+                 ,#{regId}
+                 ,SYSDATE
+                 ,#{regId}
+            )
+    ]]>
+    </insert>
+
+    <select id="selectRoleMenuRel"
+               parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.common.AdUserMenuDTO">
+    <![CDATA[
+        SELECT  mmst.menu_id AS id
+                  , NVL(mmst.par_menu_id,'0000') AS parentId
+                  , mmst.menu_nm as title
+                  , CASE WHEN amenu.menu_id = mmst.menu_id THEN 'Y' ELSE 'N' END as myMenuYn
+        FROM
+                (SELECT mst.menu_id
+                    FROM   ad_menu_mst      mst
+                           ,  ad_autr_menu_map mmap
+                    WHERE mst.menu_id = mmap.menu_id
+                    AND  mmap.autr_id = #{autrId} ) amenu
+              , (SELECT level AS lvl
+                      , mst.menu_id
+                      , mst.menu_nm
+                      , mst.menu_expl
+                      , mst.par_menu_id
+                      , mst.menu_path
+                      , mst.sort_seq
+                      , mst.use_yn
+                 FROM ad_menu_mst mst
+                 START WITH mst.par_menu_id IS NULL
+                 CONNECT BY mst.par_menu_id = PRIOR menu_id
+                 ORDER SIBLINGS BY mst.sort_seq) mmst
+            WHERE amenu.menu_id(+) = mmst.menu_id
+            AND mmst.use_yn = 'Y'
+    ]]>
+    </select>
+
+    <select id="selectThirdPartyUser" resultType="com.skb.edmp.admin.dto.admin.ThirdPartyUserDTO" parameterType="String">
+        SELECT 
+            AUM.USER_ID
+            , AUM.USER_NM || '(' || AUM.USER_ID || ')' AS LABEL
+        FROM
+            AD_USER_MST AUM
+            , (
+                SELECT
+                    AUAM.USER_ID
+                FROM
+                    AD_USER_AUTR_MAP AUAM
+                    , AD_AUTR_MENU_MAP AAMM
+                WHERE
+                    AUAM.AUTR_ID = AAMM.AUTR_ID(+)
+                    AND USER_ID != #{userId}
+                    AND AAMM.MENU_ID = '2500'
+                GROUP BY AUAM.USER_ID
+            ) AUTR
+        WHERE 
+            AUM.USER_ID = AUTR.USER_ID
+            AND AUM.DEL_YN = 'N'
+            AND AUM.USE_YN = 'Y'
+            AND AUM.JOIN_APRV_STS_CD = '1'
+        ORDER BY AUM.USER_NM
+    </select>
+
+    <select id="selectAutrList"
+               parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.common.AdUserMenuDTO">
+	    <![CDATA[
+	      SELECT  mst.menu_id AS id
+				    , NVL(mst.par_menu_id,'0000') AS parentId
+				    , mst.menu_nm  as title
+		  FROM ad_menu_mst mst
+		  START WITH mst.par_menu_id IS NULL
+		  CONNECT BY mst.par_menu_id = PRIOR menu_id
+		  AND mst.use_yn = 'Y'
+		  ORDER SIBLINGS BY mst.sort_seq
+	    ]]>
+    </select>
+    <select id="selectOneRole"
+               parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO">
+      <![CDATA[
+        SELECT autr_id
+                  ,autr_nm
+                  ,autr_expl
+        FROM ad_autr_mst
+        WHERE autr_id = #{autrId}
+     ]]>
+    </select>
+     <update id="updateRole"
+                 parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO">
+        UPDATE ad_autr_mst
+        SET  autr_nm = #{autrNm}
+            ,autr_expl = #{autrExpl}
+            ,stm_last_upd_date = SYSDATE
+            ,stm_last_upd_user_id = #{regId}
+        WHERE AUTR_ID = #{autrId}
+    </update>
+
+    <update id="deleteRole"
+               parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO">
+        UPDATE ad_autr_mst
+        SET del_yn = 'Y'
+           ,use_yn = 'N'
+           ,stm_last_upd_date = SYSDATE
+           ,stm_last_upd_user_id = #{regId}
+        WHERE AUTR_ID = #{autrId}
+    </update>
+
+     <delete id="deleteUserAutrRel"
+               parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO">
+        DELETE
+        FROM ad_user_autr_map
+        WHERE autr_id = #{autrId}
+    </delete>
+
+     <delete id="deleteAutrMenuRel"
+               parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO">
+        DELETE
+        FROM ad_autr_menu_map
+        WHERE AUTR_ID = #{autrId}
+    </delete>
+
+    <delete id="deleteUserAutrRel2"
+               parameterType="com.skb.edmp.admin.dto.admin.RoleAutrUserDTO">
+        DELETE
+        FROM ad_user_autr_map
+        WHERE autr_id = #{autrId}
+        AND user_id = #{userId}
+    </delete>
+    <select id ="selectAutrId"
+             resultType="java.lang.String">
+        SELECT LPAD(MAX(autr_id) + 1, 4, 0)  FROM ad_autr_mst
+    </select>
+    <select id="chkDupRoleNm"
+        parameterType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO"
+        resultType="com.skb.edmp.admin.dto.admin.RoleAutrMgmtDTO">
+     <![CDATA[
+        SELECT count(*) AS total
+        FROM ad_autr_mst
+        WHERE autr_nm =#{autrNm}
+        AND del_yn = 'N'  
+     ]]>
+    </select>
+</mapper>

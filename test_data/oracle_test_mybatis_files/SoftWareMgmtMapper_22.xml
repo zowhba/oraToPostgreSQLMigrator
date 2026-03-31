@@ -1,0 +1,753 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.update.SoftWareMgmtMapper">
+
+    <select id="selectListSoftWareMgmt"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+
+    <![CDATA[
+    SELECT
+         usm.sw_id
+       , usm.sw_nm
+       , usm.sw_expl
+       , usm.upd_scop_cd
+       , cd1.cd_nm cdNm1
+       , DECODE(usm.cust_dstrbnc_fct_yn,'Y','고객 방해 요소 있음','고객 방해 요소 없음') custDstrbncFctYn
+       , usm.sw_intro_msg
+       , usm.sw_inst_path
+       , usm.hash_yn
+       , usm.hash_algo_cd
+       , usm.prereboot_yn
+       , usm.postreboot_yn
+       , usm.uiapp_yn
+       , usm.skaf_fg_cd
+       , usm.dvc_modl_tot_tgt_yn
+       , usm.del_yn
+       , usm.use_yn
+       , usm.stm_fir_reg_date
+       , usm.stm_fir_reg_user_id
+       , (select count(*) from um_sw_file_dtl usfd where 1=1 and usm.sw_id = usfd.sw_id(+) and usfd.del_yn ='N' ) dvcCnt
+    FROM um_sw_mst usm
+        ,ad_comm_cd cd1
+    WHERE 1=1
+    AND  usm.upd_scop_cd = cd1.comm_cd(+)
+    AND  cd1.comm_grp_cd = 'UPD_SCOP_CD'
+    ]]>
+    <if test="!swNm.equals('')">
+    AND  UPPER(usm.sw_nm) like UPPER('%'||#{swNm}||'%')
+    </if>
+    <if test="!updScopCd.equals('')">
+    AND  usm.upd_scop_cd = #{updScopCd}
+    </if>
+    <if test="!useYn.equals('')">
+    AND  usm.use_yn = #{useYn}
+    </if>
+    AND  usm.del_yn != 'Y'
+    ORDER BY usm.stm_last_upd_date desc
+    </select>
+
+    <select id="selectListSoftWareMgmt4Model" parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO" resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+        SELECT
+            usm.sw_id
+            , usm.sw_nm
+            , usm.sw_expl
+            , usm.upd_scop_cd
+            , cd1.cd_nm cdNm1
+            , DECODE(usm.cust_dstrbnc_fct_yn,'Y','고객 방해 요소 있음','고객 방해 요소 없음') custDstrbncFctYn
+            , usm.sw_intro_msg
+            , usm.sw_inst_path
+            , usm.hash_yn
+            , usm.hash_algo_cd
+            , usm.prereboot_yn
+            , usm.postreboot_yn
+            , usm.uiapp_yn
+            , usm.skaf_fg_cd
+            , usm.dvc_modl_tot_tgt_yn
+            , usm.del_yn
+            , usm.use_yn
+            , usm.stm_fir_reg_date
+            , usm.stm_fir_reg_user_id
+            , (select count(*) from um_sw_file_dtl usfd where 1=1 and usm.sw_id = usfd.sw_id(+) and usfd.del_yn ='N' ) dvcCnt
+            , NVL(usr.user_nm, usm.stm_fir_reg_user_id) as stm_fir_reg_user_nm
+            , NVL(
+                CASE
+                    WHEN usm.dvc_fg_cd = 1 -- STB 모델 이름 리스트
+                        THEN (
+                            SELECT
+                                JSON_ARRAYAGG(sm.model_name)
+                            FROM
+                                um_sw_dvc_map usdm
+                                , stb_model sm
+                            WHERE
+                                usdm.modl_cd = sm.model_code
+                                AND usm.sw_id = usdm.sw_id
+                        )
+                    WHEN usm.dvc_fg_cd = 2 -- RCU 모델 이름 리스트
+                        THEN (
+                            SELECT
+                                JSON_ARRAYAGG(damm.acc_modl_nm)
+                            FROM
+                                um_sw_dvc_map usdm
+                                , dm_acc_modl_mst damm
+                            WHERE
+                                usdm.modl_cd = damm.acc_modl_id
+                                AND usm.sw_id = usdm.sw_id
+                        )
+                    ELSE
+                        NULL
+                END,
+                '[]'
+            ) AS modelNameList
+        FROM
+            um_sw_mst usm
+            ,ad_comm_cd cd1
+            ,ad_user_mst usr
+            <if test="modlCd!=null and modlCd!=''">
+                ,(
+                    select
+                        sw_id
+                    from
+                        um_sw_mst
+                    where
+                        dvc_modl_tot_tgt_yn='Y'
+                    union all
+                    select
+                        s.sw_id
+                    from
+                        um_sw_mst s
+                        , um_sw_dvc_map m
+                    where
+                        m.modl_cd=#{modlCd}
+                        and s.sw_id=m.sw_id
+                        and s.dvc_modl_tot_tgt_yn!='Y'
+                ) usdmap
+            </if>
+        <where>
+            nvl(usm.upd_scop_cd, '1') = cd1.comm_cd(+)
+            AND cd1.comm_grp_cd = 'UPD_SCOP_CD'
+            AND usr.user_id(+) = usm.stm_fir_reg_user_id
+            AND usm.del_yn != 'Y'
+            <if test="modlCd!=null and modlCd!=''">
+                AND usm.sw_id = usdmap.sw_id
+            </if>
+            <if test="!swNm.equals('')">
+                AND UPPER(usm.sw_nm) like UPPER('%'||#{swNm}||'%')
+            </if>
+            <if test="!updScopCd.equals('')">
+                AND usm.upd_scop_cd = #{updScopCd}
+            </if>
+            <if test="!useYn.equals('')">
+                AND usm.use_yn = #{useYn}
+            </if>
+            <if test="dvcFgCd!=null and dvcFgCd!=''">
+                AND usm.dvc_fg_cd = #{dvcFgCd}
+            </if>
+            <if test="stmFirRegUserNm != null and stmFirRegUserNm != ''">
+                AND UPPER(NVL(usr.user_nm, usm.stm_fir_reg_user_id)) LIKE UPPER('%' || #{stmFirRegUserNm} || '%')
+            </if>
+            <if test="modelName != null and modelName != ''">
+                AND (
+                    (
+                        usm.dvc_fg_cd = 1 -- STB 디바이스
+                        AND (
+                            (
+                                -- STB 모델 전체 사용 시 검색, 대상 모델이 전체라도 실제 존재하는 모델을 찾기위함
+                                usm.dvc_modl_tot_tgt_yn = 'Y'
+                                AND (
+                                    SELECT
+                                        COUNT(*)
+                                    FROM
+                                        stb_model sm
+                                    WHERE
+                                        UPPER(sm.model_name) LIKE UPPER('%' || #{modelName} || '%')
+                                ) > 0
+                            ) OR (
+                                -- STB 모델 일부 사용 시 검색
+                                usm.dvc_modl_tot_tgt_yn = 'N'
+                                AND (
+                                    SELECT
+                                        COUNT(*)
+                                    FROM
+                                        um_sw_dvc_map usdm
+                                        , stb_model sm
+                                    WHERE
+                                        usdm.modl_cd = sm.model_code
+                                        AND usm.sw_id = usdm.sw_id
+                                        AND UPPER(sm.model_name) LIKE UPPER('%' || #{modelName} || '%')
+                                ) > 0
+                            )
+                        )
+                    ) OR (
+                        usm.dvc_fg_cd = 2 -- RCU 디바이스
+                        AND (
+                            (
+                                -- RCU 모델 전체 사용 시 검색, 대상 모델이 전체라도 실제 존재하는 모델을 찾기위함
+                                usm.dvc_modl_tot_tgt_yn = 'Y'
+                                AND (
+                                    SELECT
+                                        COUNT(*)
+                                    FROM
+                                        dm_acc_modl_mst damm
+                                    WHERE
+                                        UPPER(damm.acc_modl_nm) LIKE UPPER('%' || #{modelName} || '%')
+                                ) > 0
+                            ) OR (
+                                -- RCU 모델 일부 사용 시 검색
+                                usm.dvc_modl_tot_tgt_yn = 'N'
+                                AND (
+                                    SELECT
+                                        COUNT(*)
+                                    FROM
+                                        um_sw_dvc_map usdm
+                                        , dm_acc_modl_mst damm
+                                    WHERE
+                                        usdm.modl_cd = damm.acc_modl_id
+                                        AND usm.sw_id = usdm.sw_id
+                                        AND UPPER(damm.acc_modl_nm) LIKE UPPER('%' || #{modelName} || '%')
+                                ) > 0
+                            )
+                        )
+                    )
+                )
+            </if>
+        </where>
+        ORDER BY usm.stm_last_upd_date desc
+    </select>
+
+    <select id="selectListSoftWareFile"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+
+    <![CDATA[
+	SELECT usfd.sw_file_id
+		   , usm.sw_id
+		   , usfd.stb_cmcl_fg_cd
+		   , cd1.cd_nm cdNm1
+		   , usfd.sw_file_ver
+		   , usfd.sw_file_ver as swFileVerHidden
+		   , DECODE(usfd.sw_file_dc_info,null,'N','Y') swFileDcInfoYn
+		   , usfd.sw_file_dc_info
+		   ,(
+		   		SELECT depFile.SW_ID
+		   		FROM UM_SW_FILE_DTL depFile
+		   		WHERE depFile.SW_FILE_ID = usfd.sw_file_dc_info
+		   		) as sw_dc_info
+		   ,(
+		   		SELECT depFile.SW_FILE_VER
+		   		FROM UM_SW_FILE_DTL depFile
+		   		WHERE depFile.SW_FILE_ID = usfd.sw_file_dc_info
+		   		) as sw_file_dc_ver
+		   ,(
+		   		SELECT depSw.SW_NM
+		   		FROM UM_SW_MST depSw
+		   			, UM_SW_FILE_DTL depFile
+		   		WHERE depSw.SW_ID = depFile.SW_ID
+		   			AND depFile.SW_FILE_ID = usfd.sw_file_dc_info
+		   		) as sw_file_nm
+		   , DECODE(usfd.sw_file_local_path,null,'N','Y') swFileLocalPath
+		   , usfd.stb_ui_ver
+		   , usfd.sw_file_expl
+		   , DECODE(usfd.ecdn_lnkd_sts_cd,'02','Y','N') fileYn
+		   , usfd.file_conf_date
+		   , usfd.stm_fir_reg_date
+		   , usfd.stm_fir_reg_user_id
+		   , aum.user_nm stmFirRegUserNm
+		   , usfd.ecdn_lnkd_sts_cd
+		   , cd2.cd_nm AS ecdnLnkdStsNm
+		   , usfd.SW_FILE_FG_CD
+           , usfd.revision
+	FROM um_sw_mst usm 
+		, um_sw_file_dtl usfd
+		, ad_comm_cd cd1
+		, ad_comm_cd cd2
+		, ad_user_mst aum
+	WHERE 1=1
+	    AND  usm.sw_id = usfd.sw_id(+)
+	    AND  usfd.stb_cmcl_fg_cd = cd1.comm_cd(+)
+	    AND  cd1.comm_grp_cd = 'STB_CMCL_FG_CD'
+	    AND  usfd.ecdn_lnkd_sts_cd = cd2.comm_cd(+)
+	    AND  cd2.comm_grp_cd = 'ECDN_LNKD_STS_CD'
+	    AND  usfd.stm_fir_reg_user_id = aum.user_id(+)
+	    AND  usfd.del_yn != 'Y'
+	    AND  usm.sw_id = #{swId}
+	    ]]>
+	    <if test="!stbCmclFgCd.equals('') and !stbCmclFgCd.equals('01')">
+	    AND  usfd.stb_cmcl_fg_cd = #{stbCmclFgCd}
+	    </if>
+	    <choose>
+	        <when test="stmFirRegUserIdList.size != 0 and !stmFirRegUserIdList.equals('')">
+	        AND usfd.stm_fir_reg_user_id in
+	        <foreach collection="stmFirRegUserIdList" item="type" index="index"  open="(" close=")" separator=",">
+	        #{type}
+	        </foreach>
+	        </when>
+	    </choose>
+	    <if test="!vcheck.equals('')">
+	    <choose>
+	    <when test='vcheck.equals("3")'>
+	    <if test="!minVersion.equals('') and !maxVersion.equals('')">
+	    AND usfd.sw_file_ver between #{minVersion} and #{maxVersion}
+	    </if>
+	    </when>
+	    <when test='vcheck.equals("4")'>
+	    <if test="!minVersion.equals('')">
+	    AND usfd.sw_file_ver = #{minVersion}
+	    </if>
+	    </when>
+	    <when test='vcheck.equals("1")'>
+	    <if test="!minVersion.equals('')">
+	    AND usfd.sw_file_ver <![CDATA[>=]]> #{minVersion}
+	    </if>
+	    </when>
+	    <when test='vcheck.equals("2")'>
+	    <if test="!minVersion.equals('')">
+	    AND usfd.sw_file_ver <![CDATA[<=]]> #{minVersion}
+	    </if>
+	    </when>
+	    </choose>
+	    </if>
+	     <if test="!swFileFgCd.equals('')">
+	    AND  usfd.sw_file_fg_cd = #{swFileFgCd}
+	    </if>
+    ORDER BY stm_fir_reg_date desc
+    </select>
+    
+    <select id="selectListSoftWareFile4Model"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+
+    <![CDATA[
+	SELECT usfd.sw_file_id
+		   , usm.sw_id
+		   , usfd.stb_cmcl_fg_cd
+		   , cd1.cd_nm cdNm1
+		   , usfd.sw_file_ver
+		   , usfd.sw_file_ver as swFileVerHidden
+		   , DECODE(usfd.sw_file_dc_info,null,'N','Y') swFileDcInfoYn
+		   , usfd.sw_file_dc_info
+		   ,(
+		   		SELECT depFile.SW_ID
+		   		FROM UM_SW_FILE_DTL depFile
+		   		WHERE depFile.SW_FILE_ID = usfd.sw_file_dc_info
+		   		) as sw_dc_info
+		   ,(
+		   		SELECT depFile.SW_FILE_VER
+		   		FROM UM_SW_FILE_DTL depFile
+		   		WHERE depFile.SW_FILE_ID = usfd.sw_file_dc_info
+		   		) as sw_file_dc_ver
+		   ,(
+		   		SELECT depSw.SW_NM
+		   		FROM UM_SW_MST depSw
+		   			, UM_SW_FILE_DTL depFile
+		   		WHERE depSw.SW_ID = depFile.SW_ID
+		   			AND depFile.SW_FILE_ID = usfd.sw_file_dc_info
+		   		) as sw_file_nm
+		   , DECODE(usfd.sw_file_local_path,null,'N','Y') swFileLocalPath
+		   , usfd.stb_ui_ver
+		   , usfd.sw_file_expl
+		   , DECODE(usfd.ecdn_lnkd_sts_cd,'02','Y','N') fileYn
+		   , usfd.file_conf_date
+		   , usfd.stm_fir_reg_date
+		   , usfd.stm_fir_reg_user_id
+		   , NVL(aum.user_nm, usfd.stm_fir_reg_user_id) as stmFirRegUserNm
+		   , usfd.ecdn_lnkd_sts_cd
+		   , cd2.cd_nm AS ecdnLnkdStsNm
+		   , usfd.SW_FILE_FG_CD
+           , usfd.sw_file_nm as sw_file_dtl_nm
+           , usfd.stb_sw_rst_ver
+           , usfd.revision
+	FROM um_sw_mst usm 
+		, um_sw_file_dtl usfd
+		, ad_comm_cd cd1
+		, ad_comm_cd cd2
+		, ad_user_mst aum
+		]]><if test="modlCd!=null and modlCd!=''">, (
+		select sw_id,sw_file_id from um_sw_file_dtl where sw_id=#{swId} and dvc_modl_tot_tgt_yn='Y'
+        union all 
+        select f.sw_id,f.sw_file_id from um_sw_file_dtl f, um_sw_file_dvc_map m where f.sw_id=#{swId} and m.modl_cd=#{modlCd} and f.sw_id=m.sw_id and f.sw_file_id=m.sw_file_id and f.dvc_modl_tot_tgt_yn!='Y'
+		) usfdmap</if><![CDATA[
+	WHERE 1=1
+	    AND  usm.sw_id = usfd.sw_id(+)
+	    AND  usfd.stb_cmcl_fg_cd = cd1.comm_cd(+)
+	    AND  cd1.comm_grp_cd = 'STB_CMCL_FG_CD'
+	    ]]><if test="ecdnLnkdStsCd!=null and ecdnLnkdStsCd!=''">AND  usfd.ecdn_lnkd_sts_cd = #{ecdnLnkdStsCd}
+	    </if><![CDATA[
+	    AND  usfd.ecdn_lnkd_sts_cd = cd2.comm_cd(+)
+	    AND  cd2.comm_grp_cd = 'ECDN_LNKD_STS_CD'
+	    AND  usfd.stm_fir_reg_user_id = aum.user_id(+)
+	    AND  usfd.del_yn != 'Y'
+	    AND  usm.sw_id = #{swId}
+	    ]]>
+	    <if test="modlCd!=null and modlCd!=''">
+        AND usfd.sw_id = usfdmap.sw_id AND usfd.sw_file_id = usfdmap.sw_file_id
+        </if>
+	    <if test="stbCmclFgCd != null and !stbCmclFgCd.equals('') and !stbCmclFgCd.equals('01')">
+	    AND  usfd.stb_cmcl_fg_cd = #{stbCmclFgCd}
+	    </if>
+	    <choose>
+	        <when test="stmFirRegUserIdList.size != 0 and !stmFirRegUserIdList.equals('')">
+	        AND usfd.stm_fir_reg_user_id in
+	        <foreach collection="stmFirRegUserIdList" item="type" index="index"  open="(" close=")" separator=",">
+	        #{type}
+	        </foreach>
+	        </when>
+	    </choose>
+	    <if test="!vcheck.equals('')">
+	    <choose>
+	    <when test='vcheck.equals("3")'>
+	    <if test="!minVersion.equals('') and !maxVersion.equals('')">
+	    AND usfd.sw_file_ver between #{minVersion} and #{maxVersion}
+	    </if>
+	    </when>
+	    <when test='vcheck.equals("4")'>
+	    <if test="!minVersion.equals('')">
+	    AND usfd.sw_file_ver = #{minVersion}
+	    </if>
+	    </when>
+	    <when test='vcheck.equals("1")'>
+	    <if test="!minVersion.equals('')">
+	    AND usfd.sw_file_ver <![CDATA[>=]]> #{minVersion}
+	    </if>
+	    </when>
+	    <when test='vcheck.equals("2")'>
+	    <if test="!minVersion.equals('')">
+	    AND usfd.sw_file_ver <![CDATA[<=]]> #{minVersion}
+	    </if>
+	    </when>
+	    </choose>
+	    </if>
+	     <if test="!swFileFgCd.equals('')">
+	    AND  usfd.sw_file_fg_cd = #{swFileFgCd}
+	    </if>
+    ORDER BY stm_fir_reg_date desc
+    </select>
+
+    <select id="selectOneSoftWareFile"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+        SELECT
+         usfd.sw_file_id
+       , usfd.sw_id
+       , usfd.sw_file_nm
+       , usfd.stb_cmcl_fg_cd
+       , cd1.cd_nm cdNm1
+       , usfd.sw_file_sz
+       , usfd.sw_file_ver
+       , usfd.sw_file_dc_info
+       , usfd.sw_file_frct_inst_tm
+       , DECODE(usfd.sw_file_dc_info,null,'N','Y') swFileDcInfoYn
+       , usfd.sw_file_local_path
+       , usfd.ecdn_lnkd_sts_cd
+       , cd2.cd_nm cdNm2
+       , usfd.rty_cnt
+       , usfd.ecrt_salt
+       , usfd.stb_ui_ver
+       , usfd.sw_file_expl
+       , usfd.sw_file_intro_msg
+       , usfd.dvc_modl_tot_tgt_yn
+       , NVL(to_char(usfd.file_conf_date,'yyyy.MM.dd HH24:MI:SS'),' ' ) as fileConfDate
+       , NVL(to_char(usfd.stm_fir_reg_date,'yyyy.MM.dd HH24:MI:SS'),' ' ) as stmFirRegDate
+       , usfd.stm_fir_reg_user_id
+       , NVL(to_char(usfd.stm_last_upd_date,'yyyy.MM.dd HH24:MI:SS'),' ' ) as stmLastUpdDate
+       , NVL(usfd.stm_last_upd_user_id,' ') as stmLastUpdUserId
+       , aum.user_nm stmFirRegUserNm
+	   , usfd.SW_FILE_FG_CD
+       , usfd.ecrt_algo_cd
+       , usfd.revision
+       , usfd.acc_sw_fil_modl_nm
+    FROM um_sw_mst usm ,um_sw_file_dtl usfd, ad_comm_cd cd1 , ad_user_mst aum , ad_comm_cd cd2
+    WHERE 1=1
+    AND  usm.sw_id = usfd.sw_id(+)
+    AND  usfd.stb_cmcl_fg_cd = cd1.comm_cd(+)
+    AND  cd1.comm_grp_cd = 'STB_CMCL_FG_CD'
+    AND  usfd.ecdn_lnkd_sts_cd = cd2.comm_cd(+)
+    AND  cd2.comm_grp_cd = 'ECDN_LNKD_STS_CD'
+    AND  usfd.stm_fir_reg_user_id = aum.user_id(+)
+    AND  usfd.sw_id = #{swId}
+    AND  usfd.sw_file_id = #{swFileId}
+
+    </select>
+    <select id="selectListUpdatePlan"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+
+    SELECT
+          m.plan_id
+       ,  m.plan_nm
+       ,  m.modl_cd
+       ,  sm.model_name
+       ,  uupsm.stb_sw_ver
+       ,  m.upd_sts_fg_cd
+       ,  c.cd_nm cdNm1
+       ,  d.cd_nm cdNm2
+       ,  m.stm_fir_reg_date
+       ,  m.stm_fir_reg_user_id
+    FROM  um_upd_plan_mst m , stb_model sm,ad_comm_cd c ,ad_comm_cd d , um_upd_plan_sw_map uupsm , um_sw_file_dtl usfd
+    WHERE usfd.sw_id = uupsm.sw_id
+    AND usfd.sw_file_id = uupsm.sw_file_id
+    AND uupsm.plan_id = m.plan_id
+    AND  m.modl_cd = sm.model_code
+    AND m.upd_sts_fg_cd = c.comm_cd
+    AND  c.comm_grp_cd = 'UPD_STS_FG_CD'
+    AND usfd.STB_CMCL_FG_CD = d.comm_cd
+    AND  d.comm_grp_cd = 'STB_CMCL_FG_CD'
+    AND  usfd.sw_file_ver = #{swFileVer}
+    AND  usfd.sw_id = #{swId}
+    ORDER BY stm_fir_reg_date desc
+
+    </select>
+
+<select id="selectListUiVerMst"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+
+    SELECT
+          stb_ui_ver
+    FROM  dm_ui_ver_mst
+    WHERE use_yn ='Y'
+    ORDER BY stb_ui_ver
+
+    </select>
+
+
+<select id="selectOneDcInfo"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+
+    SELECT
+          usm.sw_nm
+       ,  usfd.sw_file_ver
+       ,  usfd.stm_fir_reg_date
+       ,  usfd.stm_fir_reg_user_id
+    FROM  um_sw_file_dtl usfd , um_sw_mst usm
+    WHERE usfd.sw_id = usm.sw_id
+    AND  usfd.sw_file_id = #{swFileDcInfo}
+
+    </select>
+
+    <select id="selectListStmFirRegUserId"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+    <![CDATA[
+    SELECT
+         distinct usfd.stm_fir_reg_user_id
+       , aum.user_nm stmFirRegUserNm
+    FROM um_sw_file_dtl usfd , ad_user_mst aum
+    WHERE 1=1
+    AND  aum.user_id = usfd.stm_fir_reg_user_id
+    ]]>
+
+    </select>
+
+    <select id="selectOneSwId"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+    <![CDATA[
+    SELECT
+         sw_id
+    FROM um_sw_mst
+    WHERE stm_fir_reg_date = (select MAX(stm_fir_reg_date) from um_sw_mst)
+    ]]>
+
+    </select>
+
+    <select id="selectOneSoftWareInfo"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+    <![CDATA[
+    SELECT
+         usm.sw_id
+       , usm.sw_nm
+       , usm.sw_expl
+       , usm.sw_offc_fg_cd
+       , usm.upd_scop_cd
+       , usm.cust_dstrbnc_fct_yn
+       , usm.sw_intro_msg
+       , usm.sw_inst_path
+       , usm.hash_yn
+       , usm.hash_algo_cd
+       , usm.prereboot_yn
+       , usm.postreboot_yn
+       , usm.uiapp_yn
+       , usm.skaf_fg_cd
+       , usm.dvc_modl_tot_tgt_yn
+       , usm.del_yn
+       , usm.use_yn
+    FROM um_sw_mst usm
+    WHERE 1=1
+    AND usm.sw_id = #{swId}
+    ]]>
+
+    </select>
+
+    <select id="selctListDvcModl"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+    <![CDATA[
+    SELECT
+          sw_id
+       ,  modl_cd
+    FROM  um_sw_dvc_map
+    WHERE sw_id = #{swId}
+    ]]>
+    </select>
+    <select id="selctListDvcModlSwFile"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+    <![CDATA[
+    SELECT
+          modl_cd
+    FROM  um_sw_file_dvc_map
+    WHERE sw_id = #{swId}
+    AND   sw_file_id = #{swFileId}
+    ]]>
+
+    </select>
+
+    <select id="selectVerCheck"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    resultType="int">
+    <![CDATA[
+    SELECT
+          count(*)
+    FROM  um_sw_file_dtl
+    WHERE sw_file_ver = #{swFileVer}
+      AND sw_id = #{swId}
+      AND del_yn = 'N'
+    ]]>
+
+    </select>
+    
+    <select id="selectListEcdnErrPath"
+    	parameterType="com.skb.edmp.admin.dto.update.EcdnPathDTO"
+    	resultType="com.skb.edmp.admin.dto.update.EcdnPathDTO">
+	SELECT SW_FILE_NM AS FILE_NAME
+		, ECDN_FILE_URL
+		, RTY_CNT
+		, STM_FIR_REG_USER_ID
+		, STM_FIR_REG_DATE
+	FROM UM_ECDN_SW_FILE_ERR_HST
+	ORDER BY STM_FIR_REG_DATE DESC
+    </select>
+
+
+    <delete id="deleteEcdnErrPath" parameterType="String">
+        DELETE
+        FROM UM_ECDN_SW_FILE_ERR_HST
+        WHERE ECDN_FILE_URL = #{path}
+	</delete>
+    
+    <insert id="insertSoftWareMst"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+
+    <![CDATA[
+    INSERT INTO um_sw_mst
+    (
+      sw_id
+    , sw_nm
+    , use_yn
+    , upd_scop_cd
+    , sw_expl
+    , cust_dstrbnc_fct_yn
+    , sw_intro_msg
+    , sw_inst_path
+    , hash_yn
+    , prereboot_yn
+    , postreboot_yn
+    , uiapp_yn
+    , skaf_fg_cd
+    , stm_fir_reg_date
+    , stm_fir_reg_user_id
+    )
+VALUES
+    (
+      '2'
+    , #{swNm}
+    , #{useYn}
+    , #{updScopCd}
+    , #{swExpl}
+    , #{custDstrbncFctYn}
+    , #{swIntroMsg}
+    , #{swInstPath}
+    , #{hashYn}
+    , #{prerebootYn}
+    , #{postrebootYn}
+    , #{uiappYn}
+    , #{skafFgCd}
+    , sysdate
+    , #{stmFirRegUserId}
+    )
+    ]]>
+
+    </insert>
+
+    <update id="updateSoftWareMst"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+    UPDATE um_sw_mst
+    SET   sw_nm = #{swNm}
+        , use_yn = #{useYn}
+        , upd_scop_cd = #{updScopCd}
+        , sw_expl = #{swExpl}
+        , cust_dstrbnc_fct_yn = #{custDstrbncFctYn}
+        , sw_intro_msg = #{swIntroMsg}
+        , sw_inst_path = #{swInstPath}
+        , hash_yn = #{hashYn}
+        , prereboot_yn = #{prerebootYn}
+        , postreboot_yn = #{postrebootYn}
+        , uiapp_yn = #{uiappYn}
+        , skaf_fg_cd = #{skafFgCd}
+    WHERE sw_id = #{swId}
+    </update>
+
+    <insert id="insertSwDeviceMap"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+
+    <![CDATA[
+    INSERT INTO um_sw_dvc_map
+    (
+      sw_file_id
+    , sw_id
+    , modl_cd
+    , ecpt_tgt_yn
+    , stm_fir_reg_date
+    , stm_fir_reg_user_id
+    )
+VALUES
+    (
+      #{swFileId}
+    , #{swId}
+    , #{modlCd}
+    , #{ecptTgtYn}
+    , sysdate
+    , #{stmFirRegUserId}
+    )
+    ]]>
+
+    </insert>
+    <update id="updateSwFile"
+    parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+
+    </update>
+
+	<select id="selectSwFileUrl"
+	    parameterType="java.lang.String"
+	    resultType="java.lang.String">
+	SELECT DEST_URL
+	FROM UM_SW_FILE_DTL
+	WHERE SW_FILE_ID = #{value}
+	</select>
+
+    <select id="selectListAccSwFilModlLoc"
+	    resultType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO">
+        SELECT
+            acc_modl_id,
+            acc_sw_fil_modl_nm_loc_start,
+            acc_sw_fil_modl_nm_loc_end
+        FROM
+            dm_acc_modl_mst
+	</select>
+</mapper>

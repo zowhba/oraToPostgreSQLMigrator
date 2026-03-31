@@ -38,6 +38,12 @@ def create_project(req: ProjectCreateRequest) -> ProjectCreateResponse:
     exists = cur.fetchone() is not None
 
     if exists:
+        # 기존 비밀번호 유지 로직 추가
+        if req.db_config.pw in ["********", "****", ""]:
+            cur.execute("SELECT db_pw FROM projects WHERE project_id = %s", (req.project_id,))
+            old_pw = cur.fetchone()[0]
+            req.db_config.pw = old_pw
+
         # 기존 프로젝트 수정
         cur.execute(
             """
@@ -159,17 +165,35 @@ def get_db_config(project_id: str) -> Optional[DBConfig]:
 # DB 연결 테스트
 # ────────────────────────────────────────────
 
-def test_db_connection(project_id: str) -> ConnectionTestResponse:
-    proj = get_project(project_id)
-    if not proj:
-        return ConnectionTestResponse(
-            status="error",
-            message=f"프로젝트 '{project_id}'를 찾을 수 없습니다.",
-            connected=False,
-        )
+def test_db_connection(project_id: Optional[str] = None, config: Optional[DBConfig] = None) -> ConnectionTestResponse:
+    """
+    DB 연결 테스트 (project_id가 있으면 DB에서 조회, config가 있으면 직접 사용)
+    """
+    cfg = config
+    
+    if project_id and not cfg:
+        proj = get_project(project_id)
+        if not proj:
+            return ConnectionTestResponse(
+                status="error",
+                message=f"프로젝트 '{project_id}'를 찾을 수 없습니다.",
+                connected=False,
+            )
+        cfg = proj["db_config"]
 
-    cfg: DBConfig = proj["db_config"]
+    if not cfg:
+        return ConnectionTestResponse(status="error", message="연결 정보가 없습니다.", connected=False)
+
+    # 마스킹된 비밀번호 처리: 실제 DB에서 가져오기 (이미 등록된 경우)
+    # 공백 제거 후 비교하여 더 정확하게 매칭
+    current_pw = cfg.pw.strip() if cfg.pw else ""
+    if current_pw in ["********", "****"] and project_id:
+        proj = get_project(project_id)
+        if proj:
+            cfg.pw = proj["db_config"].pw
+
     try:
+        # Neon DB 등 클라우드 DB 연동을 위해 sslmode='require' 필수 지정
         conn = psycopg2.connect(
             host=cfg.host,
             port=cfg.port,
@@ -177,6 +201,7 @@ def test_db_connection(project_id: str) -> ConnectionTestResponse:
             user=cfg.user,
             password=cfg.pw,
             connect_timeout=10,
+            sslmode='require'
         )
         cur = conn.cursor()
         cur.execute("SELECT 1")

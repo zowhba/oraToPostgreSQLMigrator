@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.provisioning.ItlkMgmtMapper">
+
+    <select id="selectListItlkRsc"
+	        parameterType="com.skb.edmp.admin.dto.provisioning.ItlkMgmtDTO"
+	        resultType="com.skb.edmp.admin.dto.provisioning.ItlkMgmtDTO">
+
+	        SELECT a.ITLK_ID,
+				   a.ITLK_NM,
+				   a.ITLK_STM_NM,
+				   a.ITLK_MTHD_CLS_CD,
+				   b.CD_NM AS ITLK_MTHD_CLS_NM,
+				   a.ITLK_YN,
+				   a.USE_YN,
+				   a.ITLK_EXPL,
+				   a.RLTM_UPD_SEND_YN,
+				   NVL(a.FIR_VAL_ITLK_YN,'N') FIR_VAL_ITLK_YN,
+				   a.DEL_YN,
+				   a.API_KEY_VAL,
+				   a.BAT_DB_URL,
+				   a.BAT_DB_ID,
+				   a.BAT_DB_PWD,
+				   a.BAT_SQL,
+				   a.BAT_DVLP_JOB_ID,
+				   a.STM_FIR_REG_USER_ID,
+				   (SELECT NVL(MAX(c.USER_NM),'manual') FROM AD_USER_MST c WHERE c.USER_ID = a.STM_FIR_REG_USER_ID) STM_FIR_REG_USER_NM,
+				   TO_CHAR(a.STM_FIR_REG_DATE,'YYYY.MM.DD HH24:MI') STM_FIR_REG_DATE,
+				   a.STM_LAST_UPD_USER_ID,
+                   (SELECT NVL(MAX(d.USER_NM),'manual') FROM AD_USER_MST d WHERE d.USER_ID = a.STM_LAST_UPD_USER_ID) STM_LAST_UPD_USER_Nm,
+                   TO_CHAR(a.STM_LAST_UPD_DATE,'YYYY.MM.DD HH24:MI') STM_LAST_UPD_DATE
+			FROM PM_ITLK_RSC_MST a,
+			     AD_COMM_CD b
+			WHERE 1=1
+			  AND a.ITLK_MTHD_CLS_CD = b.COMM_CD
+			  AND a.DEL_YN = 'N'
+			  AND b.COMM_GRP_CD = 'ITLK_MTHD_CLS_CD'
+			  <if test="itlkNm != null and itlkNm != '' ">
+                  AND UPPER(a.ITLK_NM) LIKE '%'||UPPER(#{itlkNm})||'%'
+              </if>
+			  <if test="itlkStmNm != null and itlkStmNm != '' ">
+                   AND UPPER(a.ITLK_STM_NM) LIKE '%'||UPPER(#{itlkStmNm})||'%'
+              </if>
+              <if test="itlkMthdClsCds != null and itlkMthdClsCds.size > 0">
+                    AND a.ITLK_MTHD_CLS_CD IN
+	                <foreach item="value" collection="itlkMthdClsCds" open="(" close=")" separator=",">
+	                      #{value}
+	                </foreach>
+              </if>
+              <if test="itlkYn != null and itlkYn != '' ">
+                   AND a.ITLK_YN = #{itlkYn}
+              </if>
+              <if test="useYn != null and useYn != '' ">
+                   AND a.USE_YN = #{useYn}
+              </if>
+              ORDER BY a.STM_LAST_UPD_DATE DESC, a.ITLK_NM
+    </select>
+
+    <select id="selectListItlkStmNm"
+            resultType="com.skb.edmp.admin.dto.provisioning.ItlkMgmtDTO">
+
+            SELECT DISTINCT ITLK_STM_NM
+            FROM PM_ITLK_RSC_MST
+            WHERE 1=1
+            AND USE_YN = 'Y'
+            AND DEL_YN != 'Y'
+            ORDER BY 1
+    </select>
+
+    <select id="selectListItlkParam"
+            parameterType="com.skb.edmp.admin.dto.provisioning.ItlkParamDTO"
+            resultType="com.skb.edmp.admin.dto.provisioning.ItlkParamDTO">
+
+			SELECT b.ITLK_ID,
+			       b.PARAM_KEY,
+			       b.PARAM_VAL,
+			       b.PARAM_EXPL
+			FROM PM_ITLK_RSC_MST a,
+			     PM_ITLK_RSC_PARAM_MAP b
+			WHERE 1=1
+			AND a.ITLK_ID = #{itlkId}
+			AND a.ITLK_ID = b.ITLK_ID
+			AND a.USE_YN = 'Y'
+			AND a.DEL_YN != 'Y'
+    </select>
+
+
+</mapper>

@@ -64,6 +64,7 @@ def fetch_schema_context(db_config: DBConfig, sql_xml: str) -> str:
             user=db_config.user,
             password=db_config.pw,
             connect_timeout=10,
+            sslmode='require'
         )
         cur = conn.cursor()
 

@@ -79,4 +79,6 @@ class QueryResult(BaseModel):
 class ConvertResponse(BaseModel):
     """Interface B 변환 응답"""
     project_id: str
+    xml_file_name: str = Field("", description="원본 파일명")
+    duration_seconds: float = Field(0.0, description="전체 변환 소요 시간")
     queries: list[QueryResult]

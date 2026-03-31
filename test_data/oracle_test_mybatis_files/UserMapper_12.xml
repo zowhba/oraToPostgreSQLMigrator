@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.common.UserMapper">
+    <select id="selectOneUserCheck"
+    parameterType="com.skb.edmp.admin.dto.common.UserDTO"
+    resultType="int">
+
+    <![CDATA[
+    SELECT
+        count(*)
+    FROM ad_user_mst
+    WHERE user_id = #{userId}
+
+    ]]>
+    </select>
+
+    <select id="selectOneUserEmailCheckCnt"
+            parameterType="com.skb.edmp.admin.dto.common.UserDTO"
+            resultType="int">
+
+    <![CDATA[
+        SELECT
+            count(*)
+        FROM ad_user_mst
+        WHERE user_id != #{userId}
+            AND user_email_addr = #{userEmailAddr}
+            AND del_yn = 'N'
+
+        ]]>
+    </select>
+
+    <insert id="insertUserJoin" parameterType="com.skb.edmp.admin.dto.common.UserDTO">
+
+    <![CDATA[
+    INSERT INTO AD_USER_MST
+    (
+     user_id
+    ,user_nm
+    ,user_pwd
+    ,user_pwd_last_upd_date
+    ,user_typ_fg_cd
+    ,user_co_fg_cd
+    ,user_email_addr
+    ,del_yn
+    ,use_yn
+    ,user_login_last_date
+    ,user_id_lock_yn
+    ,join_aprv_sts_cd
+    ,stm_fir_reg_date
+    ,stm_fir_reg_user_id
+    ,stm_last_upd_date
+    ,stm_last_upd_user_id
+
+    )
+VALUES
+    (
+     #{userId}
+    ,#{userNm}
+    ,#{userPwd}
+    ,SYSDATE
+    ,'3'
+    ,#{userCoFgCd}
+    ,#{userEmailAddr}
+    ,'N'
+    ,#{useYn}
+    ,SYSDATE
+    ,'N'
+    ,#{joinAprvStsCd}
+    ,SYSDATE
+    ,#{userId}
+    ,SYSDATE
+    ,#{userId}
+
+    )
+    ]]>
+    </insert>
+
+    <insert id="insertUserJoinAprvHst"
+    parameterType="com.skb.edmp.admin.dto.common.UserDTO">
+
+    <![CDATA[
+    INSERT INTO AD_USER_JOIN_APRV_HST
+    (
+     user_id
+	,join_aprv_req_seq
+	,join_aprv_sts_cd
+    ,join_aprv_req_msg
+	,stm_fir_reg_date
+	,stm_fir_reg_user_id
+
+
+    )
+VALUES
+    (
+     #{userId}
+    ,1
+    ,#{joinAprvStsCd}
+    ,#{joinAprvReqMsg}
+    ,SYSDATE
+    ,#{userId}
+
+    )
+    ]]>
+    </insert>
+
+    <insert id="insertUserConnLog"
+    parameterType="com.skb.edmp.admin.dto.common.UserDTO">
+
+    <![CDATA[
+    INSERT INTO AD_USER_CONN_LOG
+    (
+     user_id
+    ,user_conn_date
+    ,user_conn_ipaddr
+    ,user_work_fg_cd
+    ,user_work_cts
+    )
+VALUES
+    (
+     #{userId}
+    ,SYSDATE
+    ,'222.00.11.2'
+    ,01
+    ,'test작업'
+
+    )
+    ]]>
+
+    </insert>
+
+
+    <update id="updateUserPwd" parameterType="com.skb.edmp.admin.dto.common.UserDTO">
+    <![CDATA[
+    UPDATE ad_user_mst
+    SET user_pwd = #{userPwd}
+      , user_bf_pwd = #{userBfPwd}
+      , user_pwd_last_upd_date = SYSDATE
+    WHERE user_id = #{userId}
+    ]]>
+    </update>
+
+    <update id="updateUserLock" parameterType="com.skb.edmp.admin.dto.common.UserDTO">
+    <![CDATA[
+    UPDATE ad_user_mst
+    SET user_id_lock_yn = 'Y'
+      , join_aprv_sts_cd = '3'
+    WHERE user_id = #{userId}
+    ]]>
+    </update>
+
+    <update id="updateUserMst" parameterType="com.skb.edmp.admin.dto.common.UserDTO">
+
+    UPDATE ad_user_mst
+    SET user_nm = #{userNm}
+      , user_pwd = #{userPwd}
+      , user_pwd_last_upd_date = SYSDATE
+      , user_bf_pwd = #{userNowPwd}
+	  , user_co_fg_cd = #{userCoFgCd}
+	  , user_email_addr = #{userEmailAddr}
+	  , stm_last_upd_date = SYSDATE
+	  , init_menu_id = #{initMenuId}
+    WHERE user_id = #{userId}
+
+    </update>
+
+    <select id="selectListAdStmAlrmHst"
+    parameterType="com.skb.edmp.admin.dto.common.AdStmAlrmHstDTO"
+    resultType="com.skb.edmp.admin.dto.common.AdStmAlrmHstDTO">
+
+    <![CDATA[
+    SELECT T.* FROM (
+	    SELECT
+	        seq_id,
+	        stm_cd,
+	        alrm_nm,
+	        alrm_note,
+	        alrm_cts,
+	        alrm_lvl_cd,
+	        alrm_tgt_addr,
+	        TO_CHAR(stm_fir_reg_date,'YYYY.MM.DD HH24:MI:SS') stm_fir_reg_date
+	    FROM
+	        ad_stm_alrm_hst
+	    WHERE 1 = 1
+	      AND stm_fir_reg_date > (
+	            SELECT
+	                CASE
+	                    WHEN alrm_last_conf_date IS NULL THEN
+	                        TO_DATE('20190101', 'YYYYMMDD')
+	                    ELSE SYSDATE - (
+					                        SELECT
+					                            comm_cd
+					                        FROM
+					                            ad_comm_cd
+					                        WHERE
+					                            comm_grp_cd = 'ALARM_EXPIR_DUR'
+					                    )
+	                END sel_dt
+	            FROM
+	                ad_user_mst
+	            WHERE
+	                user_id = #{userId}
+	        )
+	     AND stm_cd = (
+	           SELECT
+	               CASE
+	                   WHEN stm_cd = '0005' THEN (
+	                           SELECT
+	                               '0005'
+	                           FROM
+	                               ad_user_autr_map
+	                           WHERE
+	                               user_id = #{userId}
+	                               AND autr_id = '0001'
+	                       )
+	                   ELSE
+	                       stm_cd
+	               END
+	           FROM
+	               dual
+	         )
+	     ]]>
+	      <if test="alrmLvlCd != null and alrmLvlCd != '' ">
+	           AND alrm_lvl_cd = #{alrmLvlCd}
+	       </if>
+	      order by stm_fir_reg_date desc ) T
+	   WHERE ROWNUM <![CDATA[<=]]> (SELECT comm_cd FROM ad_comm_cd WHERE comm_grp_cd = 'ALRAM_MAX_ROW')
+
+
+    </select>
+
+    <select id="selectOneAdStmAlrmHstCnt"
+    parameterType="com.skb.edmp.admin.dto.common.AdStmAlrmHstDTO"
+    resultType="com.skb.edmp.admin.dto.common.AdStmAlrmHstDTO">
+
+    <![CDATA[
+    SELECT
+	    TRIM(TO_CHAR(COUNT(*),'999,999'))||'건' ALRM_CNT
+	FROM
+	    ad_stm_alrm_hst
+	WHERE
+	    stm_fir_reg_date > (
+	        SELECT
+	            CASE
+	                WHEN SYSDATE - alrm_last_conf_date < (SELECT
+	                        comm_cd
+	                    FROM
+	                        ad_comm_cd
+	                    WHERE
+	                        comm_grp_cd = 'ALARM_EXPIR_DUR'
+	                ) THEN
+	                    alrm_last_conf_date
+	                WHEN SYSDATE - alrm_last_conf_date >= (
+	                    SELECT
+	                        comm_cd
+	                    FROM
+	                        ad_comm_cd
+	                    WHERE
+	                        comm_grp_cd = 'ALARM_EXPIR_DUR'
+	                ) THEN
+	                    SYSDATE - 14
+	                WHEN alrm_last_conf_date IS NULL THEN
+	                    TO_DATE('20190101', 'YYYYMMDD')
+	            END sel_dt
+	        FROM
+	            ad_user_mst
+	        WHERE
+	            user_id = #{userId}
+	    )
+	    AND stm_cd = (
+		        SELECT
+		            CASE
+		                WHEN stm_cd = '0005' THEN (
+		                        SELECT
+		                            '0005'
+		                        FROM
+		                            ad_user_autr_map
+		                        WHERE
+		                            user_id = #{userId}
+		                            AND autr_id = '0001'
+		                    )
+		                ELSE
+		                    stm_cd
+		            END
+		        FROM
+		            dual
+		    )
+    ]]>
+    </select>
+
+    <update id="updateAlrmLastConfDate" parameterType="com.skb.edmp.admin.dto.common.UserDTO">
+    <![CDATA[
+	    UPDATE ad_user_mst
+	    SET alrm_last_conf_date = sysdate
+	      , stm_last_upd_date = sysdate
+	      , stm_last_upd_user_id = #{userId}
+	    WHERE user_id = #{userId}
+    ]]>
+    </update>
+
+    <insert id="insertAdStmAlrmHst" parameterType="com.skb.edmp.admin.dto.common.AdStmAlrmHstDTO">
+
+    <![CDATA[
+    INSERT INTO ad_stm_alrm_hst
+    (
+     seq_id
+    ,stm_cd
+    ,alrm_nm
+    ,alrm_note
+    ,alrm_cts
+    ,alrm_lvl_cd
+    ,alrm_tgt_addr
+    ,stm_fir_reg_date
+    ,stm_fir_reg_user_id
+    ,stm_last_upd_date
+    ,stm_last_upd_user_id
+
+    )
+    VALUES
+    (
+     AD_STM_ALRM_HST_SEQ.nextval
+    ,#{stmCd}
+    ,#{alrmNm}
+    ,#{alrmNote}
+    ,#{alrmCts}
+    ,#{alrmLvlCd}
+    ,#{alrmTgtAddr}
+    ,SYSDATE
+    ,#{userId}
+    ,SYSDATE
+    ,#{userId}
+    )
+    ]]>
+    </insert>
+
+
+</mapper>

@@ -164,40 +164,22 @@ export async function deleteProject(projectId) {
 }
 
 /**
- * DB 연결 테스트 - POST /api/projects/{project_id}/test-connection
+ * 데이터베이스 연결 테스트 - POST /api/projects/{id}/test-connection
  */
-export async function testConnection(projectId) {
+export async function testConnection(projectId, dbConfig = null) {
   if (USE_MOCK) {
-    console.log('[Mock] testConnection:', projectId)
-
-    const project = mockProjects.find(p => p.project_id === projectId)
-    if (!project) {
-      throw new Error(`프로젝트 '${projectId}'를 찾을 수 없습니다.`)
+    await new Promise(r => setTimeout(r, 1000))
+    if (dbConfig && dbConfig.host.includes('error')) {
+      return { status: 'error', message: 'DB 연결 실패: Connection refused', connected: false }
     }
-
-    // Mock: 랜덤하게 성공/실패
-    const success = Math.random() > 0.3
-
-    if (success) {
-      return {
-        status: 'success',
-        message: `DB 연결 성공 (${project.db_config_summary})`,
-        connected: true
-      }
-    } else {
-      return {
-        status: 'error',
-        message: 'DB 연결 실패: Connection refused',
-        connected: false
-      }
-    }
+    return { status: 'success', message: 'DB 연결 성공 (Mock)', connected: true }
   }
 
   try {
-    const response = await api.post(`/projects/${projectId}/test-connection`)
+    // dbConfig가 있으면 body로 전달
+    const response = await api.post(`/projects/${projectId}/test-connection`, dbConfig)
     return response.data
   } catch (error) {
-    // HTTP 에러인 경우 실패 응답으로 변환
     const detail = error?.response?.data?.detail || error.message || 'DB 연결 실패'
     return { status: 'error', message: detail, connected: false }
   }
@@ -221,29 +203,104 @@ export async function convertQueries(data) {
 }
 
 /**
- * Mock 응답 생성 (Backend 연동 전 개발용)
+ * 실시간 진행 상황을 포함한 쿼리 변환 요청 - POST /api/convert-stream
+ * @param {Object} data - 변환 요청 데이터
+ * @param {Function} onMessage - 각 진행 청크 발생 시 호출될 콜백
  */
-function generateMockResponse(data) {
-  const mockQueries = data.queries.map(query => ({
-    query_id: query.query_id,
-    tag_name: query.tag_name,
-    attributes: query.attributes,
-    original_sql_xml: query.original_sql_xml,
-    difficulty_level: Math.floor(Math.random() * 3) + 1,
-    converted_sql: convertMockSql(query.original_sql_xml),
-    conversion_log: generateMockLog(query.original_sql_xml),
-    dry_run_result: {
-      is_success: Math.random() > 0.2,
-      explain_plan: 'Hash Left Join (cost=10.20..45.12 rows=100 width=32)',
-      error_message: null
-    },
-    ai_guide_report: 'DDL을 분석하여 최적의 JOIN 구조로 변환했습니다. NVL 함수를 COALESCE로 대체하였으며, Oracle 특유의 (+) 조인 문법을 표준 LEFT OUTER JOIN으로 변환했습니다.'
-  }))
-
-  return {
-    project_id: data.project_id,
-    queries: mockQueries
+export async function convertQueriesStream(data, onMessage) {
+  if (USE_MOCK) {
+    console.log('[Mock] convertQueriesStream 시작')
+    const mock = generateMockResponse(data)
+    
+    // Mock 모드 실시간 흉내
+    onMessage({ type: 'progress', current: 0, total: data.queries.length, message: 'DB 연결 확인 중...', estimated_seconds: data.queries.length * 2 })
+    await new Promise(r => setTimeout(r, 800))
+    
+    for (let i = 0; i < mock.queries.length; i++) {
+      onMessage({ type: 'progress', current: i + 1, total: mock.queries.length, message: `쿼리 변환 중 (${i + 1}/${mock.queries.length}): ${mock.queries[i].query_id}`, estimated_seconds: (mock.queries.length - i) * 2 })
+      await new Promise(r => setTimeout(r, 600))
+      onMessage({ type: 'query_result', query_id: mock.queries[i].query_id, data: mock.queries[i] })
+    }
+    
+    onMessage({ type: 'complete', final_response: mock })
+    return
   }
+
+  try {
+    const response = await fetch('/api/convert-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      
+      buffer += decoder.decode(value, { stream: true })
+      
+      // SSE 규격인 "\n\n" 기준으로 이벤트 분리
+      const parts = buffer.split('\n\n')
+      // 마지막 요소는 아직 완료되지 않은 조각일 수 있으므로 버퍼에 보관
+      buffer = parts.pop() || ''
+      
+      for (const part of parts) {
+        const lines = part.split('\n')
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data: ')) continue
+          
+          const rawJson = trimmed.substring(6) // "data: " 제거
+          try {
+            const json = JSON.parse(rawJson)
+            onMessage(json)
+          } catch (e) {
+            console.error('Failed to parse SSE data:', rawJson, e)
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Stream request failed:', error)
+    throw error
+  }
+}
+
+/**
+ * 작업 히스토리 계층 구조 조회 - GET /api/history
+ */
+export async function getHistory() {
+  if (USE_MOCK) {
+    return {
+      status: 'success',
+      data: [
+        {
+          project_id: 'PRJ_SKB_001',
+          project_name: 'SKB 차세대 마이그레이션',
+          files: [
+            {
+              file_name: 'PlanMapper.xml',
+              attempts: [
+                { conversion_id: 1, timestamp: '2024-03-25T10:00:00', total: 10, success: 8, duration: 15.5, levels: { l1: 5, l2: 3, l3: 2 } },
+                { conversion_id: 2, timestamp: '2024-03-25T11:30:00', total: 10, success: 10, duration: 12.2, levels: { l1: 8, l2: 2, l3: 0 } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+
+  const response = await api.get('/history')
+  return response.data
 }
 
 /**
@@ -278,6 +335,22 @@ function generateMockLog(originalSql) {
   }
 
   return logs
+}
+
+/**
+ * 작업 히스토리 전체 목록 최신순 조회 - GET /api/history/list
+ */
+export async function getHistoryList() {
+  const response = await api.get('/history/list')
+  return response.data
+}
+
+/**
+ * 특정 히스토리 상세 조회 - GET /api/history/{id}
+ */
+export async function getHistoryDetail(id) {
+  const response = await api.get(`/history/${id}`)
+  return response.data
 }
 
 export default api

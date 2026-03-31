@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.configuration.StbChgMapper">
+
+    <sql id="PREFIX">
+    SELECT
+        P.*
+        FROM (
+              SELECT
+                  ROWNUM AS RNUM
+                , PAGING.*
+                  FROM (
+    </sql>
+    <sql id="MIDDELFIX">
+        ) PAGING
+        WHERE ROWNUM &lt;=
+    </sql>
+    <sql id="ENDFIX">
+        ) P
+        WHERE RNUM &gt;
+    </sql>
+
+    <select id="selectListKeyValSearch"
+	        parameterType="com.skb.edmp.admin.dto.configuration.TmpletDTO"
+	        resultType="com.skb.edmp.admin.dto.device.DeviceDTO">
+	<include refid="PREFIX" />
+         SELECT
+         COUNT(*) OVER() TOTAL,
+         T.*
+         FROM (
+                WITH RSC AS (
+		             SELECT
+			             /*+ PARALLEL(4) */
+			             DDM.STB_ID
+			            ,DECODE(LENGTH(STB.USER_SERVICE_NUM),10,'상용','테스트용' ) STBDIVISION
+			            ,PS.MAC_ADDRESS
+			            ,(SELECT SM.MODEL_NAME
+			                FROM STB_MODEL SM
+			               WHERE SM.MODEL_CODE = PS.MODEL_CODE
+			                 AND ROWNUM = 1) MODEL_NAME
+			            ,(SELECT MCM.CUG_NM
+			                FROM DM_CUG_MST DCM ,MN_CUG_MST MCM
+			               WHERE STB.SERVICE_CODE = DCM.CUG_ID
+			                 AND DCM.CUG_ID = MCM.CUG_ID
+			                 AND ROWNUM = 1) CUG_EXPL
+			            ,(SELECT COMM.CD_NM
+			                FROM AD_COMM_CD COMM
+			               WHERE COMM.COMM_GRP_CD = 'IPTV_STATUS_CODE'
+			                 AND COMM.COMM_CD = STB.IPTV_STATUS_CODE
+			                 AND ROWNUM = 1) CD_NM
+			            ,DDPM.CLNT_IPADDR
+			            ,DDM.STB_SW_VER STB_SW_PLAN_INST_VER
+			            ,DDM.STB_SW_PLAN_LAST_VER
+			            ,TO_CHAR(DDPM.STM_UPTM, 'YYYY.MM.DD HH24:MI') STM_UPTM
+			            ,DECODE(DDPM.STM_UPTM,NULL,'',TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM)||'일') AS OVERUPTIME
+			            ,'N' AS MYSTBYN
+			            ,(SELECT DQTM.TEAM_NM
+			                FROM DM_QLTY_TEAM_MST DQTM
+			               WHERE DDM.TEAM_CD = DQTM.TEAM_CD
+			                 AND ROWNUM = 1) AREAQLTY
+			            ,STB.USER_SERVICE_NUM
+			            ,DECODE(DDPM.HDMI_POW,'1','사용함','0','사용 안함',NULL) HDMI_POW
+			            ,DECODE(DDPM.RCU_PAIRING,'true','Y','false','N',NULL) RCU_PAIRING
+			            ,DDM.TEAM_CD
+			        FROM
+			             STB STB
+			            ,DM_DVC_MST DDM
+			            ,PHYSICAL_STB PS
+			            ,DM_DVC_PRVN_MST DDPM
+			          WHERE 1=1
+			            AND DDM.STB_ID = STB.STB_ID
+			            AND DDM.STB_ID = PS.STB_ID (+)
+			            AND DDM.STB_ID = DDPM.STB_ID (+)
+			          ORDER BY DDM.STB_ID
+		         )
+		         , STB_TMPLET AS (
+		           SELECT b.TMPLET_ID,
+		               d.STB_ID AS MAIN_KEY,
+		               b.SUB_KEY,
+		               c.SUB_VAL,
+		               d.*
+		            FROM PM_TMPLET_MST a,
+		              PM_TMPLET_SUBKEY_MAP b,
+		              PM_TMPLET_SUBVAL_MAP c,
+		              RSC d
+		            WHERE 1=1
+		             AND a.TMPLET_ID = b.TMPLET_ID
+		             AND b.TMPLET_ID = c.TMPLET_ID(+)
+		             AND b.SUB_KEY = c.SUB_KEY(+)
+		             AND b.SUB_VAL_SEQ = c.SUB_VAL_SEQ(+)
+		             AND a.TMPLET_ID = '1'
+		             AND b.USE_YN = 'Y'
+		             AND b.SUB_KEY = #{subKey}
+		         )
+		         , RSC_KEY_DATA AS (
+		             SELECT  t.STB_ID
+							,t.STBDIVISION
+							,t.MAC_ADDRESS
+							,t.MODEL_NAME
+							,t.CUG_EXPL
+							,t.CD_NM
+							,t.CLNT_IPADDR
+							,t.STB_SW_PLAN_INST_VER
+							,t.STB_SW_PLAN_LAST_VER
+							,t.STM_UPTM
+							,t.OVERUPTIME
+							,'N' AS MYSTBYN
+							,t.AREAQLTY
+							,t.USER_SERVICE_NUM
+							,t.HDMI_POW
+							,t.RCU_PAIRING
+							,t.TEAM_CD
+		           FROM STB_TMPLET t,
+		              PM_CONFIG_DTS c,
+		              PM_CONFIG_SUBKEY_MAP s
+		      WHERE 1=1
+		       AND c.MAIN_KEY = t.MAIN_KEY
+		       AND c.TMPLET_ID = t.TMPLET_ID
+		       AND t.TMPLET_ID = s.TMPLET_ID(+)
+		       AND t.MAIN_KEY = s.MAIN_KEY(+)
+		       AND t.SUB_KEY = s.SUB_KEY(+)
+		       AND c.USE_YN = 'Y'
+		             <choose>
+		                 <when test="subVals.size != 0">
+		                   AND NVL(s.SUB_VAL, t.SUB_VAL) IN
+		                  <foreach collection="subVals" item="subVal" index="index"  open="(" close=")" separator=",">
+		                      #{subVal}
+		                  </foreach>
+		                  </when>
+		             </choose>
+		         )
+		         SELECT * FROM RSC_KEY_DATA
+		     ) T
+		<include refid="MIDDELFIX" />
+         #{endRow}
+       <include refid="ENDFIX" />
+         #{startRow}
+    </select>
+
+    <select id="selectListSubKeyInfo"
+            resultType="com.skb.edmp.admin.dto.configuration.TmpletSubKeyDTO">
+
+            SELECT b.SUB_KEY
+			FROM PM_TMPLET_MST a,
+			     PM_TMPLET_SUBKEY_MAP b
+			WHERE 1=1
+			AND a.TMPLET_ID = b.TMPLET_ID
+			AND a.SYNC_YN = 'Y'
+			AND a.TMPLET_ID = '1'
+    </select>
+
+    <select id="selectListPopSubKeyInfo"
+            resultType="com.skb.edmp.admin.dto.configuration.TmpletSubKeyDTO">
+
+            WITH VAL_LIST AS (
+				 SELECT distinct sub_key,
+				           SUBSTR(
+				             XMLAGG (
+				                 XMLELEMENT ( COL, ';', sub_val || ':' || sub_val) ORDER BY sub_val_seq ).EXTRACT('//text()').GETSTRINGVAL()
+				                , 2) bas_val
+				     FROM pm_tmplet_subval_map
+				      WHERE 1=1
+				       AND TMPLET_ID = '1'
+				   GROUP BY sub_key
+				)
+				 SELECT B.SUB_KEY,
+			            B.SUB_VAL_TYP_CD,
+			            C.SUB_VAL AS SUB_VAL,
+			            B.SUB_VAL_SEQ,
+			            D.BAS_VAL
+			     FROM PM_TMPLET_MST A,
+			          PM_TMPLET_SUBKEY_MAP B,
+			          PM_TMPLET_SUBVAL_MAP C,
+			          VAL_LIST D
+			   WHERE 1=1
+			         AND A.TMPLET_ID = B.TMPLET_ID
+			         AND B.TMPLET_ID = C.TMPLET_ID
+			         AND B.SUB_KEY = C.SUB_KEY
+			         AND B.SUB_KEY = D.SUB_KEY
+			         AND B.SUB_VAL_SEQ = C.SUB_VAL_SEQ
+			         AND A.DEL_YN = 'N'
+			         AND A.TMPLET_ID = '1'
+
+    </select>
+
+
+</mapper>

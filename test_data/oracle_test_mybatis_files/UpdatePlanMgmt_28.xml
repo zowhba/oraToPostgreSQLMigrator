@@ -1,0 +1,1582 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.update.UpdatePlanMgmt">
+
+    <select id="selectListUpdatePlan_backup"
+               parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO">
+    <![CDATA[
+	SELECT  firtMst.plan_nm as firstPlanNm
+		  , mst.root_plan_id
+	      , mst.plan_id
+	      , mst.plan_nm
+	      , parPlan.childCount
+	      , swMapCnt.swCnt
+	      , mst.modl_cd
+	      , smdl.model_name as modlNm
+	      , mst.stb_cmcl_fg_cd
+	      , mst.stb_sw_plan_last_ver
+	      , mst.stb_ui_ver
+	      , usm.upd_scop_cd
+	      , cd5.cd_nm  as updScopNm
+	      , cd1.cd_nm as stbCmclFgNm
+	      , cd3.cd_nm as planAplFgNm
+	      , cd3.COMM_CD as planAplFgCd
+	      , mst.upd_sts_fg_cd
+	      , cd4.cd_nm as updStsFgNm
+	      , usr.user_nm as regNm
+	      , to_char(mst.stm_fir_reg_date,'yyyy.mm.dd') stm_fir_reg_date
+	      , to_char(mst.stm_last_upd_date,'yyyy.mm.dd') stm_last_upd_date
+	          , mst.stm_fir_reg_date
+	FROM  um_upd_plan_mst mst
+	       , um_upd_plan_mst firtMst
+	       , um_upd_plan_sw_map uupsm
+	       , um_sw_mst usm
+	       , stb_model smdl
+	       , ad_user_mst usr
+	       , ad_comm_cd cd1
+	       , ad_comm_cd cd3
+	       , ad_comm_cd cd4
+	       , ad_comm_cd cd5
+	       ,(select count(*) as childCount
+		               ,par_plan_id
+		        from um_upd_plan_mst
+		        where par_plan_id is not null
+		        	AND PAR_PLAN_ID != PLAN_ID
+		        group by par_plan_id) parPlan
+		    ,(SELECT plan_id, count(*) as swCnt FROM um_upd_plan_sw_map GROUP BY PLAN_ID) swMapCnt
+	WHERE 1=1
+		AND mst.root_plan_id = firtMst.plan_id(+)
+		AND mst.plan_id = uupsm.plan_id(+)
+		AND mst.plan_id = parPlan.par_plan_id(+)
+		AND mst.plan_id = swMapCnt.plan_id(+)
+		AND mst.STB_SW_PLAN_LAST_VER = uupsm.STB_SW_VER(+)
+		AND uupsm.sw_id =  usm.sw_id(+)
+		AND usr.user_id(+) = mst.stm_fir_reg_user_id
+		AND mst.modl_cd = smdl.model_code
+		AND cd1.comm_grp_cd = 'STB_CMCL_FG_CD'
+		AND cd1.comm_cd = mst.stb_cmcl_fg_cd
+		AND cd3.comm_grp_cd = 'PLAN_APL_FG_CD'
+		AND cd3.comm_cd = mst.plan_apl_fg_cd
+		AND cd4.comm_grp_cd(+) = 'UPD_STS_FG_CD'
+		AND cd4.comm_cd(+)= mst.upd_sts_fg_cd
+		AND cd5.comm_grp_cd(+) = 'UPD_SCOP_CD'
+		AND cd5.comm_cd(+) = usm.upd_scop_cd   
+      ]]>
+      <if test="planType != 'normal' and planType != null and planType != '' ">
+      	AND mst.plan_apl_fg_cd in ('01','02','03')
+      </if>
+      <if test="planType != 'develop' and planType != null and planType != '' ">
+      	AND mst.plan_apl_fg_cd = '04'
+      </if>
+      
+      <if test="firstPlanNm != null and firstPlanNm != '' ">
+		AND UPPER(firtMst.plan_nm) like  '%' || UPPER(#{firstPlanNm}) || '%'
+      </if>
+      <if test="planNm != null and planNm != '' ">
+        AND UPPER(mst.plan_nm) like  '%' || UPPER(#{planNm}) || '%'
+      </if>
+      <if test="selModelCd != null and selModelCd.size > 0">
+        AND mst.modl_cd  IN
+          <foreach item="value" collection="selModelCd" open="(" close=")" separator=",">
+                #{value}
+          </foreach>
+      </if>
+      <if test="selPlanAplyFgCd != null and selPlanAplyFgCd.size > 0">
+        AND mst.plan_apl_fg_cd  IN
+          <foreach item="value" collection="selPlanAplyFgCd" open="(" close=")" separator=",">
+                #{value}
+          </foreach>
+      </if>
+      <if test="selStbCmclFgCd != null and selStbCmclFgCd.size > 0">
+        AND mst.stb_cmcl_fg_cd  IN
+          <foreach item="value" collection="selStbCmclFgCd" open="(" close=")" separator=",">
+                #{value}
+          </foreach>
+      </if>
+      <if test="selUpdStsFgCd != null and selUpdStsFgCd.size > 0">
+        AND mst.upd_sts_fg_cd  IN
+          <foreach item="value" collection="selUpdStsFgCd" open="(" close=")" separator=",">
+                #{value}
+          </foreach>
+      </if>
+      <if test="updScopCd != null and updScopCd != 'all' ">
+       AND usm.upd_scop_cd  =  #{updScopCd}
+      </if>
+       <if test="selRegId != null and selRegId.size > 0 ">
+       AND usr.user_id   IN
+        <foreach item="value" collection="selRegId" open="(" close=")" separator=",">
+                #{value}
+        </foreach>
+      </if>
+      <if test="!fromDt.equals('') and !toDt.equals('')">
+          <choose>
+              <when test='check.equals("3")'>
+                  AND mst.stm_fir_reg_date between to_date(#{fromDt}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                 and to_date(#{toDt}||'23:59:59','yyyyMMdd HH24:MI:SS')
+              </when>
+	          <when test="!fromDt.equals('')">
+		          <if test='check.equals("4")'>
+		           AND to_char(mst.stm_fir_reg_date,'yyyyMMdd') = #{fromDt}
+		          </if>
+		          <if test='check.equals("1")'>
+		           AND mst.stm_fir_reg_date <![CDATA[>=]]> to_date(#{fromDt})
+		          </if>
+		          <if test='check.equals("2")'>
+		           AND mst.stm_fir_reg_date <![CDATA[<=]]> to_date(#{fromDt})
+		          </if>
+	           </when>
+          </choose>
+      </if>
+      <choose>
+	      <when test='uiVerCheck.equals("3")'>
+		      <if test="!uiFromVersion.equals('') and !uiToVersion.equals('')">
+		          AND REPLACE(mst.stb_ui_ver,'.','') between #{uiFromVersion} and #{uiToVersion}
+		      </if>
+		  </when>
+		  <when test='uiVerCheck.equals("4")'>
+		      <if test="!uiFromVersion.equals('')">
+		        AND REPLACE(mst.stb_ui_ver,'.','') = #{uiFromVersion}
+		      </if>
+		  </when>
+		  <when test='uiVerCheck.equals("1")'>
+		      <if test="!uiFromVersion.equals('')">
+		        AND REPLACE(mst.stb_ui_ver,'.','') <![CDATA[>=]]> #{uiFromVersion}
+		      </if>
+		  </when>
+		  <when test='uiVerCheck.equals("2")'>
+		      <if test="!uiFromVersion.equals('')">
+		        AND REPLACE(mst.stb_ui_ver,'.','') <![CDATA[<=]]> #{uiFromVersion}
+		      </if>
+		  </when>
+      </choose>
+      <choose>
+          <when test='swVerCheck.equals("3")'>
+              <if test="!swFromVersion.equals('') and !swToVersion.equals('')">
+                  AND REPLACE(mst.stb_sw_plan_last_ver,'.','') between #{swFromVersion} and #{swToVersion}
+              </if>
+          </when>
+          <when test='swVerCheck.equals("4")'>
+              <if test="!swFromVersion.equals('')">
+                AND REPLACE(mst.stb_sw_plan_last_ver,'.','') = #{swFromVersion}
+              </if>
+          </when>
+          <when test='swVerCheck.equals("1")'>
+              <if test="!swFromVersion.equals('')">
+                AND REPLACE(mst.stb_sw_plan_last_ver,'.','') <![CDATA[>=]]> #{swFromVersion}
+              </if>
+          </when>
+          <when test='swVerCheck.equals("2")'>
+              <if test="!swFromVersion.equals('')">
+                AND REPLACE(mst.stb_sw_plan_last_ver,'.','') <![CDATA[<=]]> #{swFromVersion}
+              </if>
+          </when>
+      </choose>
+      ORDER BY mst.stm_last_upd_date DESC
+    </select>
+    <!-- ######################## selectListUpdatePlan with ref_plan_id ######################## -->
+    <select id="selectListUpdatePlan"
+               parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO">
+    <![CDATA[
+	SELECT  firtMst.plan_nm as firstPlanNm
+		  , mst.root_plan_id
+	      , mst.plan_id
+	      , mst.plan_nm
+	      , parPlan.childCount
+	      , NVL2(apmap.ref_plan_id, apswMapCnt.swCnt, swMapCnt.swCnt) as swCnt
+	      , mst.modl_cd
+	      , smdl.model_name as modlNm
+	      , mst.stb_cmcl_fg_cd
+	      , mst.stb_sw_plan_last_ver
+	      , mst.stb_ui_ver
+	      , NVL2(apmap.ref_plan_id, apswmst.upd_scop_cd, usm.upd_scop_cd) upd_scop_cd
+	      , NVL2(apmap.ref_plan_id, apcommcd.cd_nm, cd5.cd_nm) as updScopNm
+	      , cd1.cd_nm as stbCmclFgNm
+	      , cd3.cd_nm as planAplFgNm
+	      , cd3.COMM_CD as planAplFgCd
+	      , mst.upd_sts_fg_cd
+	      , CASE WHEN mst.upd_sts_fg_cd = '2'
+	              AND SCH_LST.PLAN_CNT > 0
+	              AND SCH_LST.GOING_CNT = 0 THEN '진행예정' -- 계획서가 진행(2) 일 때, 계획 중인 수행계획이 있으면 "진행예정" 으로 표기
+	             ELSE cd4.cd_nm
+	         END as updStsFgNm
+	      , usr.user_nm as regNm
+	      , to_char(mst.stm_fir_reg_date,'yyyy.mm.dd') stm_fir_reg_date
+	      , to_char(mst.stm_last_upd_date,'yyyy.mm.dd') stm_last_upd_date
+            , mst.stm_fir_reg_date
+            , mst.scrbr_typ_cd
+            , (SELECT
+                    COMM.CD_NM
+                FROM
+                    AD_COMM_CD COMM
+                WHERE
+                    COMM.COMM_GRP_CD = 'SCRBR_TYP_CD'
+                        AND COMM.COMM_CD = mst.SCRBR_TYP_CD ) SCRBR_TYP_NM
+	FROM  um_upd_plan_mst mst
+	       , um_upd_plan_mst firtMst
+	       , um_upd_plan_sw_map uupsm
+	       , um_sw_mst usm
+	       , stb_model smdl
+	       , ad_user_mst usr
+	       , ad_comm_cd cd1
+	       , ad_comm_cd cd3
+	       , ad_comm_cd cd4
+	       , ad_comm_cd cd5
+	       ,(select count(*) as childCount
+		               ,par_plan_id
+		        from um_upd_plan_mst
+		        where par_plan_id is not null
+		        	AND PAR_PLAN_ID != PLAN_ID
+		        group by par_plan_id) parPlan
+		    ,(SELECT plan_id, count(*) as swCnt FROM um_upd_plan_sw_map GROUP BY PLAN_ID) swMapCnt
+		    ------------ join for ref_plan_id -----------
+		    , um_auth_plan_map apmap
+			, um_upd_plan_mst apmst
+			, um_upd_plan_sw_map apswmap
+			, um_sw_mst apswmst
+			, (select plan_id, count(*) as swCnt from um_upd_plan_sw_map group by plan_id) apswMapCnt
+			, ad_comm_cd apcommcd
+			, (SELECT PLAN_ID
+					, SUM(DECODE(UPD_STS_FG_CD, 1, 1, 0)) PLAN_CNT
+					, SUM(DECODE(UPD_STS_FG_CD, 2, 1, 0)) GOING_CNT
+					, SUM(DECODE(UPD_STS_FG_CD, 3, 1, 0)) COMPLETE_CNT
+					, SUM(DECODE(UPD_STS_FG_CD, 4, 1, 0)) STOP_CNT
+				 FROM UM_UPD_PLAN_EXE_SCH_LST
+				GROUP BY PLAN_ID
+			  ) SCH_LST
+	WHERE 1=1
+		AND mst.root_plan_id = firtMst.plan_id(+)
+		AND mst.plan_id = uupsm.plan_id(+)
+		AND mst.plan_id = parPlan.par_plan_id(+)
+		AND mst.plan_id = swMapCnt.plan_id(+)
+		AND mst.STB_SW_PLAN_LAST_VER = uupsm.STB_SW_VER(+)
+		AND uupsm.sw_id =  usm.sw_id(+)
+		AND usr.user_id(+) = mst.stm_fir_reg_user_id
+		AND mst.modl_cd = smdl.model_code
+		AND cd1.comm_grp_cd = 'STB_CMCL_FG_CD'
+		AND cd1.comm_cd = mst.stb_cmcl_fg_cd
+		AND cd3.comm_grp_cd = 'PLAN_APL_FG_CD'
+		AND cd3.comm_cd = mst.plan_apl_fg_cd
+		AND cd4.comm_grp_cd(+) = 'UPD_STS_FG_CD'
+		AND cd4.comm_cd(+)= mst.upd_sts_fg_cd
+		AND cd5.comm_grp_cd(+) = 'UPD_SCOP_CD'
+		AND cd5.comm_cd(+) = usm.upd_scop_cd
+		--------------- join for ref_plan_id -----------
+		AND mst.plan_id = apmap.auth_plan_id(+)
+		AND mst.root_plan_id = apmap.root_plan_id(+)
+		AND apmap.ref_plan_id = apmst.plan_id(+)
+		AND apmst.plan_id = apswmap.plan_id(+)
+		AND apmst.stb_sw_plan_last_ver = apswmap.stb_sw_ver(+)
+		AND apswmap.sw_id = apswmst.sw_id(+)
+		AND apmst.plan_id = apswMapCnt.plan_id(+)
+		AND apcommcd.comm_grp_cd(+) = 'UPD_SCOP_CD'
+		AND apcommcd.comm_cd(+) = apswmst.upd_scop_cd
+		AND SCH_LST.PLAN_ID(+) = MST.PLAN_ID
+      ]]>
+      <if test="planType != 'normal' and planType != null and planType != '' ">
+      	AND mst.plan_apl_fg_cd in ('01','02','03')
+      </if>
+      <if test="planType != 'develop' and planType != null and planType != '' ">
+      	AND mst.plan_apl_fg_cd = '04'
+      </if>
+      
+      <if test="firstPlanNm != null and firstPlanNm != '' ">
+		AND UPPER(firtMst.plan_nm) like  '%' || UPPER(#{firstPlanNm}) || '%'
+      </if>
+      <if test="planNm != null and planNm != '' ">
+        AND UPPER(mst.plan_nm) like  '%' || UPPER(#{planNm}) || '%'
+      </if>
+      <if test="selModelCd != null and selModelCd.size > 0">
+        AND mst.modl_cd  IN
+          <foreach item="value" collection="selModelCd" open="(" close=")" separator=",">
+                #{value}
+          </foreach>
+      </if>
+      <if test="selPlanAplyFgCd != null and selPlanAplyFgCd.size > 0">
+        AND mst.plan_apl_fg_cd  IN
+          <foreach item="value" collection="selPlanAplyFgCd" open="(" close=")" separator=",">
+                #{value}
+          </foreach>
+      </if>
+      <if test="selStbCmclFgCd != null and selStbCmclFgCd.size > 0">
+        AND mst.stb_cmcl_fg_cd  IN
+          <foreach item="value" collection="selStbCmclFgCd" open="(" close=")" separator=",">
+                #{value}
+          </foreach>
+      </if>
+      <if test="selUpdStsFgCd != null and selUpdStsFgCd.size > 0">
+        AND mst.upd_sts_fg_cd  IN
+          <foreach item="value" collection="selUpdStsFgCd" open="(" close=")" separator=",">
+                #{value}
+          </foreach>
+      </if>
+      <if test="updScopCd != null and updScopCd != 'all' ">
+       AND usm.upd_scop_cd  =  #{updScopCd}
+      </if>
+       <if test="selRegId != null and selRegId.size > 0 ">
+       AND usr.user_id   IN
+        <foreach item="value" collection="selRegId" open="(" close=")" separator=",">
+                #{value}
+        </foreach>
+      </if>
+      <if test="!fromDt.equals('') and !toDt.equals('')">
+          <choose>
+              <when test='check.equals("3")'>
+                  AND mst.stm_fir_reg_date between to_date(#{fromDt}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                 and to_date(#{toDt}||'23:59:59','yyyyMMdd HH24:MI:SS')
+              </when>
+	          <when test="!fromDt.equals('')">
+		          <if test='check.equals("4")'>
+		           AND to_char(mst.stm_fir_reg_date,'yyyyMMdd') = #{fromDt}
+		          </if>
+		          <if test='check.equals("1")'>
+		           AND mst.stm_fir_reg_date <![CDATA[>=]]> to_date(#{fromDt})
+		          </if>
+		          <if test='check.equals("2")'>
+		           AND mst.stm_fir_reg_date <![CDATA[<=]]> to_date(#{fromDt})
+		          </if>
+	           </when>
+          </choose>
+      </if>
+      <choose>
+	      <when test='uiVerCheck.equals("3")'>
+		      <if test="!uiFromVersion.equals('') and !uiToVersion.equals('')">
+		          AND REPLACE(mst.stb_ui_ver,'.','') between #{uiFromVersion} and #{uiToVersion}
+		      </if>
+		  </when>
+		  <when test='uiVerCheck.equals("4")'>
+		      <if test="!uiFromVersion.equals('')">
+		        AND REPLACE(mst.stb_ui_ver,'.','') = #{uiFromVersion}
+		      </if>
+		  </when>
+		  <when test='uiVerCheck.equals("1")'>
+		      <if test="!uiFromVersion.equals('')">
+		        AND REPLACE(mst.stb_ui_ver,'.','') <![CDATA[>=]]> #{uiFromVersion}
+		      </if>
+		  </when>
+		  <when test='uiVerCheck.equals("2")'>
+		      <if test="!uiFromVersion.equals('')">
+		        AND REPLACE(mst.stb_ui_ver,'.','') <![CDATA[<=]]> #{uiFromVersion}
+		      </if>
+		  </when>
+      </choose>
+      <choose>
+          <when test='swVerCheck.equals("3")'>
+              <if test="!swFromVersion.equals('') and !swToVersion.equals('')">
+                  AND REPLACE(mst.stb_sw_plan_last_ver,'.','') between #{swFromVersion} and #{swToVersion}
+              </if>
+          </when>
+          <when test='swVerCheck.equals("4")'>
+              <if test="!swFromVersion.equals('')">
+                AND REPLACE(mst.stb_sw_plan_last_ver,'.','') = #{swFromVersion}
+              </if>
+          </when>
+          <when test='swVerCheck.equals("1")'>
+              <if test="!swFromVersion.equals('')">
+                AND REPLACE(mst.stb_sw_plan_last_ver,'.','') <![CDATA[>=]]> #{swFromVersion}
+              </if>
+          </when>
+          <when test='swVerCheck.equals("2")'>
+              <if test="!swFromVersion.equals('')">
+                AND REPLACE(mst.stb_sw_plan_last_ver,'.','') <![CDATA[<=]]> #{swFromVersion}
+              </if>
+          </when>
+      </choose>
+      ORDER BY mst.stm_last_upd_date DESC
+    </select>
+
+    <select id="selectListReg"
+               resultType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO">
+      <![CDATA[
+		SELECT mst.user_id AS stmFirRegUserId
+		          ,mst.user_nm AS regNm
+		FROM ad_user_mst mst
+		    ,(SELECT DISTINCT stm_fir_reg_user_id
+		      FROM um_upd_plan_mst
+		     )pmst
+		WHERE mst.user_id = pmst.stm_fir_reg_user_id
+		ORDER BY regNm asc
+      ]]>
+    </select>
+    <select id="selectListMyStb"
+           parameterType="com.skb.edmp.admin.dto.device.DeviceDTO"
+           resultType="com.skb.edmp.admin.dto.device.DeviceDTO">
+			SELECT uupsm.stb_id
+			FROM  um_upd_plan_stb_map uupsm
+			WHERE 1=1
+		    AND uupsm.plan_id =#{planId}
+	    <if test="ecptTgtYn != null and ecptTgtYn != '' ">
+			AND uupsm.ecpt_tgt_yn = #{ecptTgtYn}
+		</if>
+    </select>
+    <select id="selectListDvcGrp"
+               parameterType="com.skb.edmp.admin.dto.device.DeviceGroupDTO"
+               resultType="com.skb.edmp.admin.dto.device.DeviceGroupDTO">
+    <![CDATA[
+	      SELECT dmst.dvc_grp_id
+	                ,dmst.dvc_grp_nm
+	                ,dmst.dvc_grp_fg_cd
+	                ,cd.cd_nm as dvc_grp_fg_nm
+	                ,CASE WHEN  dmst.dvc_grp_fg_cd = '01' THEN '0'
+                         ELSE  TO_CHAR(dmst.grp_tgt_qty)
+                     END grpTgtQty
+	                ,dmst.use_yn
+	                ,dmst.dvc_grp_expl
+	                ,dmst.grp_tgt_cond_cts
+	                ,(select user_nm from ad_user_mst where user_id = dmst.stm_fir_reg_user_id) as regNm
+	                , to_char(dmst.stm_fir_reg_date,'yyyy.mm.dd hh24:mi') stm_fir_reg_date
+	                ,(select user_nm from ad_user_mst where user_id = dmst.stm_last_upd_user_id) as updNm
+	                ,to_char(dmst.stm_last_upd_date,'yyyy.mm.dd hh24:mi') stm_last_upd_date
+     ]]>
+                <choose>
+	                <when test="planId != null and planId != '' ">
+		                , CASE WHEN dmst.dvc_grp_id in
+												           (  SELECT dvc_grp_id
+												              FROM um_upd_plan_dvc_grp_map
+												              WHERE plan_id = #{planId}
+												              AND ecpt_tgt_yn = #{ecptTgtYn}
+												            ) THEN 'Y'
+					             ELSE 'N'
+					      END myDvcGrpYn
+		             </when>
+		             <when test="planId.equals('')">
+	                    ,'N' AS  myDvcGrpYn
+	                 </when>
+	            </choose>
+	      FROM dm_dvc_grp_mst dmst
+	             ,ad_comm_cd cd
+	      WHERE 1=1
+	      AND dmst.DEL_YN = 'N'
+	      AND dmst.USE_YN = 'Y'
+	      AND cd.comm_grp_cd = 'DVC_GRP_FG_CD'
+	      AND dmst.dvc_grp_fg_cd = cd.comm_cd
+     <if test="dvcGrpNm != null and dvcGrpNm != '' ">
+        AND dmst.dvc_grp_nm  LIKE  '%' || #{dvcGrpNm} || '%'
+     </if>
+     <if test="dvcGrpFgCd != null and dvcGrpFgCd != '' ">
+        AND dmst.dvc_grp_fg_cd   = #{dvcGrpFgCd}
+     </if>
+     <if test="useYn != null and useYn != '' ">
+        AND dmst.use_yn  =  #{useYn}
+     </if>
+      <if test="selRegId != null and selRegId.size > 0">
+        AND dmst.stm_fir_reg_user_id IN
+          <foreach item="value" collection="selRegId" open="(" close=")" separator=",">
+                #{value}
+          </foreach>
+      </if>
+      ORDER BY dmst.stm_last_upd_date desc
+    </select>
+    <select id="selectListSwFile"
+               parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.update.SoftwareFileDTO">
+
+	SELECT pmst.plan_id
+		,swmap.sw_id
+		,swmap.sw_file_id
+		,smst.sw_nm
+		,swmap.stb_sw_ver
+		,smst.sw_nm
+		,smst.upd_scop_cd   --업데이트 범위
+		,cd1.cd_nm as cdNm2
+		,sfdtl.sw_file_dc_info
+		,(
+			SELECT depFile.SW_ID
+			FROM UM_SW_FILE_DTL depFile
+			WHERE depFile.SW_FILE_ID = sfdtl.sw_file_dc_info
+		) as sw_dc_info
+		,(
+			SELECT depFile.SW_FILE_VER
+			FROM UM_SW_FILE_DTL depFile
+			WHERE depFile.SW_FILE_ID = sfdtl.sw_file_dc_info
+		) as sw_file_dc_ver
+		,(
+			SELECT depSw.SW_NM
+			FROM UM_SW_MST depSw
+				, UM_SW_FILE_DTL depFile
+			WHERE depSw.SW_ID = depFile.SW_ID
+			AND depFile.SW_FILE_ID = sfdtl.sw_file_dc_info
+		) as sw_file_nm
+		,sfdtl.sw_file_ver AS swVer
+		,sfdtl.stb_ui_ver AS uiVer
+		,'' as inteDtlVer
+		, DECODE(smst.cust_dstrbnc_fct_yn,'Y','고객 방해 요소 있음','고객 방해 요소 없음') custDstrbncFctYn
+		,sfdtl.stm_fir_reg_date
+		,smst.sw_intro_msg
+		,sfdtl.sw_file_intro_msg
+		----------------------------------
+		,sfdtl.sw_file_local_path sw_upload_path
+		,sfdtl.revision
+		,uusdvm.stb_sw_rst_ver
+	FROM um_upd_plan_mst pmst
+		,um_upd_plan_sw_map swmap
+		,um_sw_mst smst
+		,um_sw_file_dtl sfdtl
+		,ad_comm_cd cd1
+		,stb_model sm
+		,um_upd_sw_dvc_ver_map uusdvm
+		<if test="refPlanId!=null and refPlanId!=''">,um_auth_plan_map uapm</if>
+	WHERE 1=1
+		<choose>
+			<when test="refPlanId!=null and refPlanId!=''">
+			AND pmst.plan_id = uapm.auth_plan_id
+        	AND pmst.root_plan_id = uapm.root_plan_id
+        	AND uapm.ref_plan_id = swmap.plan_id
+			</when>
+			<otherwise>AND pmst.plan_id =  swmap.plan_id</otherwise>
+		</choose>
+		AND smst.sw_id = swmap.sw_id
+		AND swmap.sw_file_id = sfdtl.sw_file_id
+		AND cd1.comm_grp_cd = 'UPD_SCOP_CD'
+		AND cd1.comm_cd = smst.upd_scop_cd
+		AND pmst.plan_id = #{planId}
+		AND pmst.modl_cd = sm.model_code(+)
+		AND sm.model_name = uusdvm.modl_nm(+)
+		AND swmap.stb_sw_ver = uusdvm.stb_sw_ver(+)
+    </select>
+
+     <select id="selectListExeSche"
+               parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.update.ExePlanDTO">
+         SELECT esch.plan_id
+			      ,esch.exe_sch_id
+			      ,esch.exe_sch_nm
+			      ,esch.exe_sch_expl
+			      ,esch.downld_mt_fg_cd
+			      ,esch.exe_sch_fr_dy
+			      ,esch.exe_sch_to_dy
+			      ,esch.cust_noty_mt_lst
+			      ,esch.push_delay_tm
+			      --------------------------------------------------
+			      ,esch.push_limit_cnt
+			      ,REGEXP_REPLACE(esch.exe_sch_alrm_dd,',','|') AS exeSchAlrmDD
+			      ,esch.exe_sch_alrm_hh AS exeSchAlrmHH
+			      ,REGEXP_REPLACE(esch.exe_sch_alrm_mi,',','|') AS exeSchAlrmMI
+			      ,'' AS selTgt
+			      ,NVL(esch.to_goal_qty,0) AS toGoalQty     -- 종료 목표 수량
+		     	  ,NVL(esch.tgt_qty,0) AS tgtQty                                       --계획수량
+		     	  ,NVL(esch.conf_qty,0) AS confQty                                   --실제수량
+                  ,NVL(esch.end_cond_rt,0) AS endCondRt                           --종료조건
+		          ,NVL(esch.wat_qty,0) AS notPrgQty  --미진행 수량 
+		          ,NVL(esch.prg_qty,0) AS prgQty   --진행 수량
+		          ,NVL(esch.err_qty,0) AS errQty    --오류 수량
+		     	  ,NVL(esch.to_qty,0) AS endQty    --완료 수량
+			      ,esch.scr_disp_fg_cd
+			      ,esch.slp_wat_tm
+			      ,esch.cust_noty_msg
+			      ,esch.cust_noty_mt_lst
+			      ,esch.scr_disp_tm
+			      ,esch.upd_sts_fg_cd
+			      ,NVL(esch.stop_yn,'N') AS stopYn
+                  ,cd1.cd_nm as updStsFgNm
+				  ,(SELECT user_nm FROM ad_user_mst WHERE user_id = esch.STM_FIR_REG_USER_ID) STM_FIR_REG_USER_NM
+				  ,TO_CHAR(esch.STM_FIR_REG_DATE,'YYYY.MM.DD HH24:MI') STM_FIR_REG_DATE
+                  ,(SELECT user_nm FROM ad_user_mst WHERE user_id = esch.STM_LAST_UPD_USER_ID) STM_LAST_UPD_USER_NM
+                  ,TO_CHAR(esch.stm_last_upd_date,'YYYY.MM.DD HH24:MI') stm_last_upd_date
+                  ,CASE WHEN  esch.upd_sts_fg_cd = '1' THEN 'Y'
+			               ELSE 'N'
+			       END enableUpdate
+			      ,CASE WHEN   esch.to_goal_qty > 0 THEN 'N'
+                           ELSE 'Y'
+                   END totTgtYn
+		FROM um_upd_plan_exe_sch_lst esch
+		       ,ad_comm_cd cd1
+		WHERE plan_id = #{planId}
+		AND cd1.comm_grp_cd = 'UPD_STS_FG_CD'
+        AND cd1.comm_cd = esch.upd_sts_fg_cd
+    </select>
+
+    <select id="selectListPlanDvcGrpMap"
+               parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.device.DeviceGroupDTO">
+        SELECT map.dvc_grp_id
+		          ,gmst.dvc_grp_nm
+		FROM um_upd_plan_dvc_grp_map map
+			    ,um_upd_plan_mst pmst
+			    ,dm_dvc_grp_mst gmst
+		WHERE  pmst.plan_id = #{planId}
+		AND pmst.plan_id = map.plan_id
+		AND map.dvc_grp_id = gmst.dvc_grp_id
+		AND map.ecpt_tgt_yn = #{ecptTgtYn}
+    </select>
+
+    <select id="selectListPlanStbMap"
+               parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.device.DeviceGroupStbDTO">
+       SELECT map.stb_id
+		FROM um_upd_plan_stb_map map
+		       ,um_upd_plan_mst pmst
+		WHERE  pmst.plan_id = #{planId}
+		AND pmst.plan_id = map.plan_id
+		AND map.ecpt_tgt_yn =#{ecptTgtYn}
+    </select>
+
+    <select id="selectOneDtlPlan"
+               parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO">
+        SELECT pmst.plan_id
+			      ,pmst.root_plan_id
+			      ,pmst.par_plan_id
+			      -----------------------
+			      ,uapm.ref_plan_id -- 인증계획서 매핑 추가
+			      ,usm.upd_scop_cd
+			      ,parMst.plan_nm AS parPlanNm
+                  ,pmst.stb_sw_plan_last_ver
+			      ,(SELECT  MAX(uupsm.stb_sw_ver)   AS stb_sw_ver FROM um_upd_plan_sw_map uupsm WHERE plan_id = pmst.par_plan_id) AS parStbUiVer
+			      ,firtMst.plan_nm AS firstPlanNm
+			      ,'' as parInteVer
+			      ,pmst.plan_nm
+			      ,pmst.plan_expl
+			      ,pmst.stb_cmcl_fg_cd
+			      ,pmst.plan_apl_fg_cd
+			      ,cd.cd_nm as planAplFgNm
+			      ,pmst.modl_cd
+			      ,NVL(pmst.tot_tgt_yn,'N') AS totTgtYn
+                  ,NVL(pmst.tgt_qty,0) AS tgtQty
+			      ,pmst.plan_exe_fg_cd
+			      ,pmst.upd_sts_fg_cd
+			      ,(select user_nm from ad_user_mst where user_id = pmst.stm_fir_reg_user_id) as regNm
+			      ,to_char(pmst.stm_fir_reg_date,'yyyy.mm.dd hh24:mi') stm_fir_reg_date
+			      ,(select user_nm from ad_user_mst where user_id = pmst.stm_last_upd_user_id) as updNm
+			      ,to_char(pmst.stm_last_upd_date,'yyyy.mm.dd hh24:mi') stm_last_upd_date
+			      ,pmst.plan_fg_cd
+			      ,pmst.upd_polling_tm
+			      ,(SELECT max(REQ_SVC) FROM UM_UPD_PLAN_STBL_VER_MAP WHERE STBL_PLAN_ID =#{planId} GROUP BY STBL_PLAN_ID) AS reqSvc
+                  ,pmst.scrbr_typ_cd
+		FROM um_upd_plan_mst pmst
+		       ,um_upd_plan_mst firtMst
+		       ,um_upd_plan_mst parMst
+		       ,um_upd_plan_sw_map uupsm
+               ,um_sw_mst usm
+		       ,ad_comm_cd cd
+		       ,um_auth_plan_map uapm -- 인증계획서 매핑 추가
+		WHERE pmst.plan_id = #{planId}
+			AND pmst.root_plan_id  = firtMst.plan_id(+)
+			AND pmst.par_plan_id  = parMst.plan_id(+)
+			AND pmst.plan_id = uupsm.plan_id(+)
+			AND pmst.STB_SW_PLAN_LAST_VER = uupsm.STB_SW_VER(+)
+			AND uupsm.sw_id =  usm.sw_id(+)
+			AND cd.comm_grp_cd = 'PLAN_APL_FG_CD'
+	        AND cd.comm_cd = pmst.plan_apl_fg_cd
+	        AND pmst.plan_id = uapm.auth_plan_id(+) -- 인증계획서 매핑 추가
+	        AND pmst.root_plan_id = uapm.root_plan_id(+) -- 인증계획서 매핑 추가
+    </select>
+
+    <select id="selectListPlanCugMap"
+               parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.device.MnCugMstDTO">
+		SELECT   mgm.cug_id
+		FROM mn_cug_mst mgm
+			   ,dm_cug_mst dcm
+			   ,um_upd_plan_mst pmst
+			   ,um_upd_plan_cug_map pmap
+		WHERE 1=1
+		AND  mgm.cug_id = dcm.cug_id
+		AND mgm.cug_id = pmap.cug_id
+		AND mgm.use_yn = 'Y'
+		AND pmst.plan_id = pmap.plan_id
+		AND pmst.plan_id = #{planId}
+    </select>
+    <select id="selectListSchTeamMap"
+               parameterType="com.skb.edmp.admin.dto.update.ExePlanDTO"
+               resultType="com.skb.edmp.admin.dto.admin.AdCommCdDTO">
+        SELECT distinct map.team_cd  as value
+                            , tmst.team_nm as label
+		FROM um_exe_sch_qlty_team_map map
+			    ,um_upd_plan_mst pmst
+			    ,dm_qlty_team_mst tmst
+		WHERE  pmst.plan_id = #{planId}
+		AND map.plan_id =#{planId}
+		AND map.exe_sch_id =#{exeSchId}
+		AND map.team_cd = tmst.team_cd
+    </select>
+    <select id="selectListPlanTeamMap"
+               parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.admin.AdCommCdDTO">
+       SELECT distinct qmap.team_cd as value
+        FROM um_upd_plan_qlty_team_map qmap
+                ,um_upd_plan_mst pmst
+                ,dm_qlty_team_mst tmst
+        WHERE pmst.plan_id = #{planId}
+        AND qmap.plan_id = pmst.plan_id
+        AND qmap.team_cd = tmst.team_cd
+    </select>
+
+     <select id="selectListParInstFile"
+               parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.update.SoftwareFileDTO">
+       SELECT
+                a.sw_id,
+                b.sw_file_id,
+                a.sw_nm,
+                b.sw_file_nm,
+                a.upd_scop_cd,
+                cd.cd_nm as updScopNm,
+                b.sw_file_ver,
+                b.stb_ui_ver,
+                b.stm_fir_reg_date,
+                b.sw_file_dc_info,
+                DECODE(a.cust_dstrbnc_fct_yn,'Y','고객 방해 요소 있음','고객 방해 요소 없음') custDstrbncFctYn,
+                c.stb_sw_ver,
+                a.sw_intro_msg,
+                b.sw_file_intro_msg
+        FROM
+            um_sw_mst       a,
+            um_sw_file_dtl   b,
+            (
+               SELECT A.sw_file_id,
+				       A.stb_sw_ver,
+				       A.root_plan_id,
+				       B.lvl
+				FROM
+				    (SELECT
+				            sw_file_id,
+				            stb_sw_ver,
+				            root_plan_id,
+				            plan_id
+				        FROM
+				            (
+				                SELECT
+				                    uupsm.sw_file_id     AS sw_file_id,
+				                    uupsm.stb_sw_ver     AS stb_sw_ver,
+				                    uupsm.root_plan_id   AS root_plan_id,
+				                    uupsm.plan_id as plan_id,
+				                    ROW_NUMBER() OVER(
+				                        PARTITION BY uupsm.sw_id
+				                        ORDER BY
+				                            uupsm.stb_sw_ver DESC
+				                    ) AS row_idx
+				                FROM
+				                    um_upd_plan_sw_map uupsm
+				                WHERE 1=1
+				                    AND root_plan_id = #{rootPlanId}
+				            )
+				            WHERE
+				                row_idx = 1
+				            ) A
+				            ,(SELECT level as lvl
+				                         , plan_id
+						                , plan_nm
+						                , par_plan_id
+						                , root_plan_id
+					            FROM UM_UPD_PLAN_MST
+					            START WITH root_plan_id = #{rootPlanId} AND par_plan_id is null
+					                CONNECT BY par_plan_id = prior plan_id)B
+					            WHERE A.PLAN_ID = B.PLAN_ID
+					            AND B.lvl
+					            <choose>
+                                    <when test='pageType.equals("search")'>
+					                   <![CDATA[< ]]>
+					                </when>
+					                <when test='pageType.equals("new")'>
+					                   <![CDATA[<= ]]>
+					                 </when>
+					            </choose>
+					            (SELECT lvl
+						                        FROM
+						                        (select level as lvl
+						                                , plan_id
+						                                , plan_nm
+						                                , par_plan_id
+						                                , root_plan_id
+						                            from UM_UPD_PLAN_MST
+						                            start with root_plan_id = #{rootPlanId} AND par_plan_id is null
+						                            connect by par_plan_id = prior plan_id)C
+						                        WHERE C.plan_id = #{planId})
+              ) c
+              ,ad_comm_cd cd
+        WHERE a.sw_id = b.sw_id
+        AND B.sw_file_id = c.sw_file_id
+        AND cd.comm_grp_cd = 'UPD_SCOP_CD'
+        AND  a.upd_scop_cd = cd.comm_cd
+        ORDER BY c.stb_sw_ver
+    </select>
+	<select id="selectListIntroMsg"
+               parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+               resultType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO">
+	SELECT sw.SW_NM
+		, sw.SW_INTRO_MSG
+		, swFile.SW_FILE_VER
+		, swFile.SW_FILE_INTRO_MSG
+	FROM UM_SW_MST sw
+		, UM_SW_FILE_DTL swFile
+	WHERE 1=1
+        <if test="swFileIdList.size != 0">
+            AND swFile.SW_FILE_ID IN
+            <foreach collection="swFileIdList" item="file_id" index="index"  open="(" close=")" separator=",">
+            UPPER(#{file_id})
+            </foreach>
+        </if>
+		AND sw.SW_ID = swFile.SW_ID
+	</select>
+
+     <select id="selectListCugList"
+               parameterType="com.skb.edmp.admin.dto.device.MnCugMstDTO"
+               resultType="com.skb.edmp.admin.dto.device.MnCugMstDTO">
+		SELECT mst.cug_id
+		          ,mst.cug_expl as cugNm
+		FROM dm_cug_mst            mst
+		        ,dm_cug_dvc_modl_map   map
+		WHERE map.modl_cd =  #{modlCd}
+		AND mst.cug_id = map.cug_id
+		AND map.use_yn = 'Y'
+    </select>
+
+    <select id="chkDupPlanNm"
+        parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+        resultType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO">
+    <![CDATA[
+        SELECT count(*) AS total
+		FROM um_upd_plan_mst
+		WHERE plan_nm =#{planNm}
+    ]]>
+     <if test='saveMode.equals("update")'>
+        AND plan_id !=  #{planId}
+    </if>
+    </select>
+
+
+	<select id="chkDupModlCug" 
+		parameterType="com.skb.edmp.admin.dto.update.UpdatePlanDtlDTO"
+        resultType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO">
+       <![CDATA[
+        SELECT count(*) AS total
+		FROM UM_UPD_PLAN_CUG_MAP uupcm , UM_UPD_PLAN_MST uupm 
+		WHERE UUPM.MODL_CD = #{modlCd}
+			AND UUPM.PLAN_ID = UUPCM.PLAN_ID 
+	    	AND UUPCM.CUG_ID IN (${cugListString})			
+    	]]>
+   	</select> 
+
+     <select id="selectListChkAllStb"
+               parameterType="com.skb.edmp.admin.dto.device.DeviceDTO"
+               resultType="com.skb.edmp.admin.dto.device.DeviceDTO">
+         SELECT
+             /*+ PARALLEL(4) */
+             DDM.STB_ID
+            ,DECODE(LENGTH(STB.USER_SERVICE_NUM),10,'상용','테스트용' ) STBDIVISION
+            ,PS.MAC_ADDRESS
+            ,(SELECT SM.MODEL_NAME
+                FROM STB_MODEL SM
+               WHERE SM.MODEL_CODE = PS.MODEL_CODE
+                 AND ROWNUM = 1) MODEL_NAME
+            ,(SELECT MCM.CUG_NM
+                FROM DM_CUG_MST DCM ,MN_CUG_MST MCM
+               WHERE STB.SERVICE_CODE = DCM.CUG_ID
+                 AND DCM.CUG_ID = MCM.CUG_ID
+                 AND ROWNUM = 1) CUG_EXPL
+            ,(SELECT COMM.CD_NM
+                FROM AD_COMM_CD COMM
+               WHERE COMM.COMM_GRP_CD = 'IPTV_STATUS_CODE'
+                 AND COMM.COMM_CD = STB.IPTV_STATUS_CODE
+                 AND ROWNUM = 1) CD_NM
+            ,DDPM.CLNT_IPADDR
+            ,DDM.STB_SW_VER STB_SW_PLAN_INST_VER
+            ,DDM.STB_SW_PLAN_LAST_VER
+            ,TO_CHAR(DDPM.STM_UPTM, 'YYYY.MM.DD HH24:MI') STM_UPTM
+            ,DECODE(DDPM.STM_UPTM,NULL,'',TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM)||'일') AS OVERUPTIME
+            ,'N' AS MYSTBYN
+            ,(SELECT DQTM.TEAM_NM
+                FROM DM_QLTY_TEAM_MST DQTM
+               WHERE DDM.TEAM_CD = DQTM.TEAM_CD
+                 AND ROWNUM = 1) AREAQLTY
+            ,STB.USER_SERVICE_NUM
+            ,DECODE(DDPM.HDMI_POW,'1','사용함','0','사용 안함',NULL) HDMI_POW
+            ,DECODE(DDPM.RCU_PAIRING,'true','Y','false','N',NULL) RCU_PAIRING
+            ,DDM.TEAM_CD
+        FROM
+             STB STB
+            ,DM_DVC_MST DDM
+            ,PHYSICAL_STB PS
+            ,DM_DVC_PRVN_MST DDPM
+            <if test="!deviceGroup.equals('')">
+            ,DM_DVC_GRP_MST GM
+            ,DM_DVC_GRP_PSNL_MAP GPM
+            </if>
+          WHERE 1=1
+            AND DDM.STB_ID = STB.STB_ID
+            AND DDM.STB_ID = PS.STB_ID (+)
+            AND DDM.STB_ID = DDPM.STB_ID (+)
+            <if test="!deviceGroup.equals('')">
+            AND GM.DVC_GRP_ID = GPM.DVC_GRP_ID(+)
+            AND DDM.STB_ID = GPM.STB_ID
+            AND GM.DVC_GRP_FG_CD = '02'
+            AND UPPER(GM.DVC_GRP_NM) LIKE UPPER('%' || #{deviceGroup} || '%')
+            </if>
+    <choose>
+        <when test="!macAddress.equals('')">
+            AND UPPER(PS.MAC_ADDRESS) = UPPER(#{macAddress})
+        </when>
+        <when test="!otherTxt.equals('')">
+           AND ${otherCondition} = #{otherTxt}
+        </when>
+        <when test="!stbId.equals('')">
+           AND STB.STB_ID = UPPER(#{stbId})
+        </when>
+        <otherwise>
+            <choose>
+                <when test='vcheck.equals("3")'>
+                    <if test="!toVersion.equals('') and !fromVersion.equals('')">
+                    AND REPLACE(${versionCondition},'.','') BETWEEN #{toVersion} AND #{fromVersion}
+                    </if>
+                </when>
+                <when test='vcheck.equals("4")'>
+                    <if test="!toVersion.equals('')">
+                    AND REPLACE(${versionCondition},'.','') = #{toVersion}
+                    </if>
+                </when>
+                <when test='vcheck.equals("1")'>
+                    <if test="!toVersion.equals('')">
+                    AND REPLACE(${versionCondition},'.','') <![CDATA[>=]]> #{toVersion}
+                    </if>
+                </when>
+                <when test='vcheck.equals("2")'>
+                    <if test="!toVersion.equals('')">
+                    AND REPLACE(${versionCondition},'.','') <![CDATA[<=]]> #{toVersion}
+                    </if>
+                </when>
+            </choose>
+
+            <if test="areaQltyList.size != 0 and !areaQltyList.equals('')">
+                AND DDM.TEAM_CD IN
+                <foreach collection="areaQltyList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <if test="modelNameList.size != 0 and !modelNameList.equals('')">
+                AND PS.MODEL_CODE IN
+                <foreach collection="modelNameList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <if test="divisionList.size != 0 and !divisionList.equals('')">
+                AND STB.SERVICE_CODE IN
+                <foreach collection="divisionList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <if test="networkList.size != 0 and !networkList.equals('')">
+                AND STB.NETWORK_BRAND_CODE IN
+                <foreach collection="networkList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <if test="openingStateList.size != 0 and !openingStateList.equals('')">
+                AND STB.IPTV_STATUS_CODE IN
+                <foreach collection="openingStateList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <if test="joinProductList.size != 0 and !joinProductList.equals('')">
+                AND STB.ID_PACKAGE IN
+                <foreach collection="joinProductList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <choose>
+                <when test='uptime.equals("1")'>
+                    <if test="!fromUptm.equals('') and !toUptm.equals('')">
+                        <choose>
+                        <when test='check.equals("3")'>
+                        AND DDPM.STM_UPTM BETWEEN TO_DATE(#{fromUptm}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                              AND TO_DATE(#{toUptm}||'23:59:59','yyyyMMdd HH24:MI:SS')
+                        </when>
+                        <when test="!fromUptm.equals('')">
+                        <if test='check.equals("4")'>
+                        AND DDPM.STM_UPTM BETWEEN TO_DATE(#{fromUptm}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                              AND TO_DATE(#{fromUptm}||'23:59:59','yyyyMMdd HH24:MI:SS')
+                        </if>
+                        <if test='check.equals("1")'>
+                        AND DDPM.STM_UPTM <![CDATA[>=]]> TO_DATE(#{fromUptm})
+                        </if>
+                        <if test='check.equals("2")'>
+                        AND DDPM.STM_UPTM <![CDATA[<=]]> TO_DATE(#{fromUptm})
+                        </if>
+                        </when>
+                        </choose>
+                    </if>
+                </when>
+                <when test='uptime.equals("2")'>
+                    <choose>
+                    <when test='check.equals("3")'>
+                    AND TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM) BETWEEN #{overTimeFrom} and #{overTimeTo}
+                    </when>
+                    <when test="!overTime.equals('')">
+                    <if test='check.equals("4")'>
+                    AND TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM) = #{overTime}
+                    </if>
+                    <if test='check.equals("1")'>
+                    AND TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM) <![CDATA[>=]]> #{overTime}
+                    </if>
+                    <if test='check.equals("2")'>
+                    AND TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM) <![CDATA[<=]]> #{overTime}
+                    </if>
+                    </when>
+                    </choose>
+                </when>
+            </choose>
+
+            <if test='stbDivision.equals("02")'>
+                AND LENGTH(STB.USER_SERVICE_NUM) = 10
+            </if>
+            <if test='stbDivision.equals("03")'>
+                AND LENGTH(STB.USER_SERVICE_NUM) != 10
+            </if>
+        </otherwise>
+    </choose>
+    <choose>
+        <when test='selectAllMode.equals("Y") and planId != null  and planId != "" '>
+           AND ddm.stb_id not in ( SELECT stb_id
+                                              FROM um_upd_plan_stb_map
+                                              WHERE plan_id = #{planId}
+                                              AND ecpt_tgt_yn = #{ecptTgtYn})
+        </when>
+        <when test='selectAllMode.equals("N") and planId != null  and planId != "" '>
+           AND ddm.stb_id  in ( SELECT stb_id
+                                         FROM um_upd_plan_stb_map
+                                         WHERE plan_id = #{planId}
+                                         AND ecpt_tgt_yn = #{ecptTgtYn})
+       </when>
+    </choose>
+    ORDER BY DDM.STB_ID
+    </select>
+
+    <select id="selectCountChkAllStb"
+               parameterType="com.skb.edmp.admin.dto.device.DeviceDTO"
+               resultType="java.lang.String">
+         SELECT
+             /*+ PARALLEL(4) */
+            COUNT(*)
+        FROM
+             STB STB
+            ,DM_DVC_MST DDM
+            ,PHYSICAL_STB PS
+            ,DM_DVC_PRVN_MST DDPM
+            <if test="!deviceGroup.equals('')">
+            ,DM_DVC_GRP_MST GM
+            ,DM_DVC_GRP_PSNL_MAP GPM
+            </if>
+          WHERE 1=1
+            AND DDM.STB_ID = STB.STB_ID
+            AND DDM.STB_ID = PS.STB_ID (+)
+            AND DDM.STB_ID = DDPM.STB_ID (+)
+            <if test="!deviceGroup.equals('')">
+            AND GM.DVC_GRP_ID = GPM.DVC_GRP_ID(+)
+            AND DDM.STB_ID = GPM.STB_ID
+            AND GM.DVC_GRP_FG_CD = '02'
+            AND UPPER(GM.DVC_GRP_NM) LIKE UPPER('%' || #{deviceGroup} || '%')
+            </if>
+    <choose>
+        <when test="!macAddress.equals('')">
+            AND UPPER(PS.MAC_ADDRESS) = UPPER(#{macAddress})
+        </when>
+        <when test="!otherTxt.equals('')">
+           AND ${otherCondition} = #{otherTxt}
+        </when>
+        <when test="!stbId.equals('')">
+           AND STB.STB_ID = UPPER(#{stbId})
+        </when>
+        <otherwise>
+            <choose>
+                <when test='vcheck.equals("3")'>
+                    <if test="!toVersion.equals('') and !fromVersion.equals('')">
+                    AND REPLACE(${versionCondition},'.','') BETWEEN #{toVersion} AND #{fromVersion}
+                    </if>
+                </when>
+                <when test='vcheck.equals("4")'>
+                    <if test="!toVersion.equals('')">
+                    AND REPLACE(${versionCondition},'.','') = #{toVersion}
+                    </if>
+                </when>
+                <when test='vcheck.equals("1")'>
+                    <if test="!toVersion.equals('')">
+                    AND REPLACE(${versionCondition},'.','') <![CDATA[>=]]> #{toVersion}
+                    </if>
+                </when>
+                <when test='vcheck.equals("2")'>
+                    <if test="!toVersion.equals('')">
+                    AND REPLACE(${versionCondition},'.','') <![CDATA[<=]]> #{toVersion}
+                    </if>
+                </when>
+            </choose>
+
+            <if test="areaQltyList.size != 0 and !areaQltyList.equals('')">
+                AND DDM.TEAM_CD IN
+                <foreach collection="areaQltyList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <if test="modelNameList.size != 0 and !modelNameList.equals('')">
+                AND PS.MODEL_CODE IN
+                <foreach collection="modelNameList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <if test="divisionList.size != 0 and !divisionList.equals('')">
+                AND STB.SERVICE_CODE IN
+                <foreach collection="divisionList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <if test="networkList.size != 0 and !networkList.equals('')">
+                AND STB.NETWORK_BRAND_CODE IN
+                <foreach collection="networkList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <if test="openingStateList.size != 0 and !openingStateList.equals('')">
+                AND STB.IPTV_STATUS_CODE IN
+                <foreach collection="openingStateList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <if test="joinProductList.size != 0 and !joinProductList.equals('')">
+                AND STB.ID_PACKAGE IN
+                <foreach collection="joinProductList" item="type" index="index"  open="(" close=")" separator=",">
+                #{type}
+                </foreach>
+            </if>
+
+            <choose>
+                <when test='uptime.equals("1")'>
+                    <if test="!fromUptm.equals('') and !toUptm.equals('')">
+                        <choose>
+                        <when test='check.equals("3")'>
+                        AND DDPM.STM_UPTM BETWEEN TO_DATE(#{fromUptm}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                              AND TO_DATE(#{toUptm}||'23:59:59','yyyyMMdd HH24:MI:SS')
+                        </when>
+                        <when test="!fromUptm.equals('')">
+                        <if test='check.equals("4")'>
+                        AND DDPM.STM_UPTM BETWEEN TO_DATE(#{fromUptm}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                              AND TO_DATE(#{fromUptm}||'23:59:59','yyyyMMdd HH24:MI:SS')
+                        </if>
+                        <if test='check.equals("1")'>
+                        AND DDPM.STM_UPTM <![CDATA[>=]]> TO_DATE(#{fromUptm})
+                        </if>
+                        <if test='check.equals("2")'>
+                        AND DDPM.STM_UPTM <![CDATA[<=]]> TO_DATE(#{fromUptm})
+                        </if>
+                        </when>
+                        </choose>
+                    </if>
+                </when>
+                <when test='uptime.equals("2")'>
+                    <choose>
+                    <when test='check.equals("3")'>
+                    AND TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM) BETWEEN #{overTimeFrom} and #{overTimeTo}
+                    </when>
+                    <when test="!overTime.equals('')">
+                    <if test='check.equals("4")'>
+                    AND TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM) = #{overTime}
+                    </if>
+                    <if test='check.equals("1")'>
+                    AND TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM) <![CDATA[>=]]> #{overTime}
+                    </if>
+                    <if test='check.equals("2")'>
+                    AND TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM) <![CDATA[<=]]> #{overTime}
+                    </if>
+                    </when>
+                    </choose>
+                </when>
+            </choose>
+
+            <if test='stbDivision.equals("02")'>
+                AND LENGTH(STB.USER_SERVICE_NUM) = 10
+            </if>
+            <if test='stbDivision.equals("03")'>
+                AND LENGTH(STB.USER_SERVICE_NUM) != 10
+            </if>
+        </otherwise>
+    </choose>
+    <choose>
+        <when test='selectAllMode.equals("Y") and planId != null  and planId != "" '>
+           AND ddm.stb_id not in ( SELECT stb_id
+                                              FROM um_upd_plan_stb_map
+                                              WHERE plan_id = #{planId}
+                                              AND ecpt_tgt_yn = #{ecptTgtYn})
+        </when>
+        <when test='selectAllMode.equals("N") and planId != null  and planId != "" '>
+           AND ddm.stb_id  in ( SELECT stb_id
+                                         FROM um_upd_plan_stb_map
+                                         WHERE plan_id = #{planId}
+                                         AND ecpt_tgt_yn = #{ecptTgtYn})
+       </when>
+    </choose>
+    ORDER BY DDM.STB_ID
+    </select>
+
+    <select id="selectListMChkAllStb"
+               parameterType="com.skb.edmp.admin.dto.device.DeviceDTO"
+               resultType="com.skb.edmp.admin.dto.device.DeviceDTO">
+      <![CDATA[
+         SELECT
+             /*+ PARALLEL(4) */
+             DDM.STB_ID
+            ,DECODE(LENGTH(STB.USER_SERVICE_NUM),10,'상용','테스트용' ) STBDIVISION
+            ,PS.MAC_ADDRESS
+            ,(SELECT SM.MODEL_NAME
+                FROM STB_MODEL SM
+               WHERE SM.MODEL_CODE = PS.MODEL_CODE
+                 AND ROWNUM = 1) MODEL_NAME
+            ,(SELECT MCM.CUG_NM
+                FROM DM_CUG_MST DCM ,MN_CUG_MST MCM
+               WHERE STB.SERVICE_CODE = DCM.CUG_ID
+                 AND DCM.CUG_ID = MCM.CUG_ID
+                 AND ROWNUM = 1) CUG_EXPL
+            ,(SELECT COMM.CD_NM
+                FROM AD_COMM_CD COMM
+               WHERE COMM.COMM_GRP_CD = 'IPTV_STATUS_CODE'
+                 AND COMM.COMM_CD = STB.IPTV_STATUS_CODE
+                 AND ROWNUM = 1) CD_NM
+            ,DDPM.CLNT_IPADDR
+            ,DDM.STB_SW_VER STB_SW_PLAN_INST_VER
+            ,DDM.STB_SW_PLAN_LAST_VER
+            ,TO_CHAR(DDPM.STM_UPTM, 'YYYY.MM.DD HH24:MI') STM_UPTM
+            ,DECODE(DDPM.STM_UPTM,NULL,'',TRUNC(SYSDATE) - TRUNC(DDPM.STM_UPTM)||'일') AS OVERUPTIME
+            ,'N' AS MYSTBYN
+            ,(SELECT DQTM.TEAM_NM
+                FROM DM_QLTY_TEAM_MST DQTM
+               WHERE DDM.TEAM_CD = DQTM.TEAM_CD
+                 AND ROWNUM =1) AREAQLTY
+            ,STB.USER_SERVICE_NUM
+            ,DECODE(DDPM.HDMI_POW,'1','사용함','0','사용 안함',NULL) HDMI_POW
+            ,DECODE(DDPM.RCU_PAIRING,'true','Y','false','N',NULL) RCU_PAIRING
+            ,DDM.TEAM_CD
+        FROM
+             DM_DVC_MST DDM
+            ,STB STB
+            ,PHYSICAL_STB PS
+            ,DM_DVC_PRVN_MST DDPM
+       WHERE 1=1
+         AND DDM.STB_ID = STB.STB_ID
+         AND DDM.STB_ID = PS.STB_ID (+)
+         AND DDM.STB_ID = DDPM.STB_ID (+)
+     ]]>
+        <if test="searchData.size != 0">
+            AND ${searchType} IN
+            <foreach collection="searchData" item="type" index="index"  open="(" close=")" separator=",">
+            #{type}
+            </foreach>
+        </if>
+        <choose>
+        <when test='selectAllMode.equals("Y") and planId != null  and planId != "" '>
+           AND DDM.stb_id not in ( SELECT stb_id
+                                              FROM um_upd_plan_stb_map
+                                              WHERE plan_id = #{planId}
+                                              AND ecpt_tgt_yn = #{ecptTgtYn})
+        </when>
+        <when test='selectAllMode.equals("N") and planId != null  and planId != "" '>
+           AND DDM.stb_id  in ( SELECT stb_id
+                                         FROM um_upd_plan_stb_map
+                                         WHERE plan_id = #{planId}
+                                         AND ecpt_tgt_yn = #{ecptTgtYn})
+       </when>
+    </choose>
+        ORDER BY DDM.STB_ID
+
+    </select>
+       <select id="selectMCountChkAllStb"
+               parameterType="com.skb.edmp.admin.dto.device.DeviceDTO"
+               resultType="java.lang.String">
+      <![CDATA[
+         SELECT
+             /*+ PARALLEL(4) */
+             COUNT(*)
+        FROM
+             DM_DVC_MST DDM
+            ,STB STB
+            ,PHYSICAL_STB PS
+            ,DM_DVC_PRVN_MST DDPM
+       WHERE 1=1
+         AND DDM.STB_ID = STB.STB_ID
+         AND DDM.STB_ID = PS.STB_ID (+)
+         AND DDM.STB_ID = DDPM.STB_ID (+)
+     ]]>
+        <if test="searchData.size != 0">
+            AND ${searchType} IN
+            <foreach collection="searchData" item="type" index="index"  open="(" close=")" separator=",">
+            #{type}
+            </foreach>
+        </if>
+        <choose>
+        <when test='selectAllMode.equals("Y") and planId != null  and planId != "" '>
+           AND DDM.stb_id not in ( SELECT stb_id
+                                              FROM um_upd_plan_stb_map
+                                              WHERE plan_id = #{planId}
+                                              AND ecpt_tgt_yn = #{ecptTgtYn})
+        </when>
+        <when test='selectAllMode.equals("N") and planId != null  and planId != "" '>
+           AND DDM.stb_id  in ( SELECT stb_id
+                                         FROM um_upd_plan_stb_map
+                                         WHERE plan_id = #{planId}
+                                         AND ecpt_tgt_yn = #{ecptTgtYn})
+       </when>
+     </choose>
+    </select>
+
+    <select id="selectMaxSwVer"
+               parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+               resultType="java.lang.String">
+          SELECT substr(max(uupsm.stb_sw_ver),0,9) as stbSwVer
+			FROM um_upd_plan_sw_map uupsm
+			        ,um_sw_file_dtl usfd
+			WHERE uupsm.root_plan_id = #{planId}
+			AND uupsm.sw_id = usfd.sw_id
+			AND uupsm.sw_file_id = usfd.sw_file_id
+			AND uupsm.upd_scop_cd = '1'
+     </select>
+
+    <select id="selectChildPlanCount"
+               parameterType="java.lang.String"
+               resultType="java.lang.String">
+    SELECT count(plan_id)
+	FROM um_upd_plan_mst
+	WHERE PAR_PLAN_ID = #{value}
+		AND PLAN_ID != #{value}
+<!-- 		AND STB_CMCL_FG_CD = '01' -->
+    </select>
+    
+    
+    <select id="checkParStatusStopFullAndChildPartialYn"
+    		parameterType="com.skb.edmp.admin.dto.update.SoftWareMgmtDTO"
+    		resultType="java.lang.String">
+			SELECT count(*)
+			FROM UM_UPD_PLAN_MST uupm, UM_UPD_PLAN_SW_MAP uupsm 
+			WHERE uupm.PLAN_ID = #{parPlanId}
+				AND uupm.PLAN_ID = uupsm.PLAN_ID 
+				AND uupm.UPD_STS_FG_CD = '4'
+				AND uupsm.UPD_SCOP_CD = '1'
+	</select>
+  	
+  	<select id="selectListExeSchStb"
+  			parameterType="com.skb.edmp.admin.dto.update.ExePlanDTO"
+  			resultType="java.util.LinkedHashMap">
+  		SELECT 'STB_ID' stb_id, 'PLAN_ID' plan_id, 'EXE_SCH_ID' exe_sch_id
+  		FROM DUAL
+  		UNION ALL
+  		SELECT stb_id, plan_id, exe_sch_id
+  		FROM UM_UPD_DVC_HST
+  		WHERE plan_id=#{planId}
+  		AND exe_sch_id=#{exeSchId}
+  	</select>
+
+	<select id="selectListUpdatePlanForStatistics005"
+			parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtStatisticsDTO"
+			resultType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO">
+		<!-- selectListUpdatePlanForStatistics005 -->
+		<![CDATA[
+		SELECT  firstMst.plan_nm as firstPlanNm
+			, mst.root_plan_id
+			, mst.plan_id
+			, mst.plan_nm
+			, (SELECT COUNT(*)
+				FROM um_upd_plan_mst child
+				WHERE child.par_plan_id = mst.plan_id
+					AND child.par_plan_id != child.plan_id
+				) AS childCount
+			, NVL2(apmap.ref_plan_id, apswMapCnt.swCnt, swMapCnt.swCnt) as swCnt
+			, mst.modl_cd
+			, smdl.model_name as modlNm
+			, mst.stb_cmcl_fg_cd
+			, mst.stb_sw_plan_last_ver
+			, mst.stb_ui_ver
+			, NVL2(apmap.ref_plan_id, apswmst.upd_scop_cd, usm.upd_scop_cd) upd_scop_cd
+			, NVL2(apmap.ref_plan_id, apcommcd.cd_nm, cd5.cd_nm) as updScopNm
+			, cd1.cd_nm as stbCmclFgNm
+			, cd3.cd_nm as planAplFgNm
+			, cd3.COMM_CD as planAplFgCd
+			, mst.upd_sts_fg_cd
+			, cd4.cd_nm as updStsFgNm
+			, usr.user_nm as regNm
+			, to_char(mst.stm_fir_reg_date,'yyyy.mm.dd') stm_fir_reg_date
+			, to_char(mst.stm_last_upd_date,'yyyy.mm.dd') stm_last_upd_date
+			, mst.scrbr_typ_cd
+			, (SELECT COMM.CD_NM FROM AD_COMM_CD COMM
+				WHERE COMM.COMM_GRP_CD = 'SCRBR_TYP_CD'
+					AND COMM.COMM_CD = mst.SCRBR_TYP_CD ) SCRBR_TYP_NM
+		FROM  um_upd_plan_mst mst
+			, um_upd_plan_mst firstMst
+			, um_upd_plan_sw_map uupsm
+			, um_sw_mst usm
+			, stb_model smdl
+			, ad_user_mst usr
+			, ad_comm_cd cd1
+			, ad_comm_cd cd3
+			, ad_comm_cd cd4
+			, ad_comm_cd cd5
+			, (SELECT plan_id, count(*) as swCnt FROM um_upd_plan_sw_map GROUP BY plan_id) swMapCnt
+			, um_auth_plan_map apmap
+			, um_upd_plan_mst apmst
+			, um_upd_plan_sw_map apswmap
+			, um_sw_mst apswmst
+			, (select plan_id, count(*) as swCnt from um_upd_plan_sw_map group by plan_id) apswMapCnt
+			, ad_comm_cd apcommcd
+		WHERE
+		    	mst.root_plan_id = firstMst.plan_id(+)
+			AND mst.plan_id = uupsm.plan_id(+)
+			AND mst.plan_id = swMapCnt.plan_id(+)
+			AND mst.STB_SW_PLAN_LAST_VER = uupsm.STB_SW_VER(+)
+			AND uupsm.sw_id =  usm.sw_id(+)
+			AND usr.user_id(+) = mst.stm_fir_reg_user_id
+			AND mst.modl_cd = smdl.model_code
+			AND cd1.comm_grp_cd = 'STB_CMCL_FG_CD'
+			AND cd1.comm_cd = mst.stb_cmcl_fg_cd
+			AND cd3.comm_grp_cd = 'PLAN_APL_FG_CD'
+			AND cd3.comm_cd = mst.plan_apl_fg_cd
+			AND cd4.comm_grp_cd(+) = 'UPD_STS_FG_CD'
+			AND cd4.comm_cd(+)= mst.upd_sts_fg_cd
+			AND cd5.comm_grp_cd(+) = 'UPD_SCOP_CD'
+			AND cd5.comm_cd(+) = usm.upd_scop_cd
+			AND mst.plan_id = apmap.auth_plan_id(+)
+			AND mst.root_plan_id = apmap.root_plan_id(+)
+			AND apmap.ref_plan_id = apmst.plan_id(+)
+			AND apmst.plan_id = apswmap.plan_id(+)
+			AND apmst.stb_sw_plan_last_ver = apswmap.stb_sw_ver(+)
+			AND apswmap.sw_id = apswmst.sw_id(+)
+			AND apmst.plan_id = apswMapCnt.plan_id(+)
+			AND apcommcd.comm_grp_cd(+) = 'UPD_SCOP_CD'
+			AND apcommcd.comm_cd(+) = apswmst.upd_scop_cd
+			AND mst.plan_apl_fg_cd in ('01','02','03')
+		  ]]>
+		<if test="schPlanNm != null and schPlanNm != '' ">
+			AND UPPER(mst.plan_nm) like  '%' || UPPER(#{schPlanNm}) || '%'
+		</if>
+		<if test="schModelCds != null and schModelCds.size > 0">
+			AND mst.modl_cd  IN
+			<foreach item="value" collection="schModelCds" open="(" close=")" separator=",">
+				#{value}
+			</foreach>
+		</if>
+		<if test="schUpdStsFgCd != null and schUpdStsFgCd != 'all'">
+			AND mst.upd_sts_fg_cd = #{schUpdStsFgCd}
+		</if>
+		<if test="schRegIds != null and schRegIds.size > 0">
+			AND EXISTS (
+		    	SELECT 1 FROM UM_UPD_PLAN_EXE_SCH_LST UUEXE
+				WHERE UUEXE.PLAN_ID = mst.PLAN_ID
+					AND (UUEXE.STM_FIR_REG_USER_ID IN
+				<foreach item="value" collection="schRegIds" open="(" close=")" separator=",">
+						#{value}
+				</foreach>
+						OR UUEXE.STM_LAST_UPD_USER_ID IN
+				<foreach item="value" collection="schRegIds" open="(" close=")" separator=",">
+					#{value}
+				</foreach>
+			)
+		)
+		</if>
+		<if test="schCugIds != null and schCugIds.size > 0">
+			AND EXISTS (SELECT 1 FROM UM_UPD_PLAN_CUG_MAP UUPCM WHERE UUPCM.PLAN_ID = mst.PLAN_ID AND UUPCM.CUG_ID IN
+				<foreach item="value" collection="schCugIds" open="(" close=")" separator=",">
+					#{value}
+				</foreach>
+			)
+		</if>
+		AND EXISTS (
+		    SELECT 1 FROM UM_UPD_PLAN_EXE_SCH_LST UUEXE
+			WHERE UUEXE.PLAN_ID = mst.PLAN_ID
+			AND ((UUEXE.STM_FIR_REG_DATE <![CDATA[ >= ]]> TO_DATE(#{schFromDt}, 'YYYY-MM-DD')
+					OR UUEXE.STM_LAST_UPD_DATE <![CDATA[ >= ]]> TO_DATE(#{schFromDt}, 'YYYY-MM-DD'))
+				AND (UUEXE.STM_FIR_REG_DATE <![CDATA[ <= ]]> TO_DATE(#{schToDt}, 'YYYY-MM-DD')
+					OR UUEXE.STM_LAST_UPD_DATE <![CDATA[ <= ]]> TO_DATE(#{schToDt}, 'YYYY-MM-DD'))
+			)
+		)
+		<if test="schErrCnt != null">
+		AND EXISTS (
+			SELECT COUNT(*) FROM UM_UPD_PLAN_ERR_MST UUPEM WHERE UUPEM.PLAN_ID = mst.PLAN_ID
+			GROUP BY UUPEM.PLAN_ID, UUPEM.EXE_SCH_ID, UUPEM.STB_ID, UUPEM.MAC_ADDR
+			HAVING COUNT(*) <![CDATA[ >= ]]> #{schErrCnt}
+		)
+		</if>
+		ORDER BY mst.stm_last_upd_date DESC
+	</select>
+
+	<select id="selectListExeScheForStatistics005"
+			parameterType="com.skb.edmp.admin.dto.update.UpdatePlanMgmtDTO"
+			resultType="com.skb.edmp.admin.dto.update.ExePlanDTO">
+		/** selectListExeScheForStatistics005 */
+		SELECT esch.plan_id
+			 ,esch.exe_sch_id
+			 ,esch.exe_sch_nm
+			 ,esch.exe_sch_expl
+			 ,esch.downld_mt_fg_cd
+			 ,esch.exe_sch_fr_dy
+			 ,esch.exe_sch_to_dy
+			 ,esch.cust_noty_mt_lst
+			 ,esch.push_delay_tm
+			 ,esch.push_limit_cnt
+			 ,REGEXP_REPLACE(esch.exe_sch_alrm_dd,',','|') AS exeSchAlrmDD
+			 ,esch.exe_sch_alrm_hh AS exeSchAlrmHH
+			 ,REGEXP_REPLACE(esch.exe_sch_alrm_mi,',','|') AS exeSchAlrmMI
+			 ,'' AS selTgt
+			 ,NVL(esch.to_goal_qty,0) AS toGoalQty
+			 ,NVL(esch.tgt_qty,0) AS tgtQty
+			 ,NVL(esch.conf_qty,0) AS confQty
+			 ,NVL(esch.end_cond_rt,0) AS endCondRt
+			 ,NVL(esch.wat_qty,0) AS notPrgQty
+			 ,NVL(esch.prg_qty,0) AS prgQty
+			 ,NVL(esch.err_qty,0) AS errQty
+			 ,NVL(esch.to_qty,0) AS endQty
+			 ,esch.scr_disp_fg_cd
+			 ,esch.slp_wat_tm
+			 ,esch.cust_noty_msg
+			 ,esch.cust_noty_mt_lst
+			 ,esch.scr_disp_tm
+			 ,esch.upd_sts_fg_cd
+			 ,NVL(esch.stop_yn,'N') AS stopYn
+			 ,cd1.cd_nm as updStsFgNm
+			 ,(SELECT user_nm FROM ad_user_mst WHERE user_id = esch.STM_FIR_REG_USER_ID) STM_FIR_REG_USER_NM
+			 ,TO_CHAR(esch.STM_FIR_REG_DATE,'YYYY.MM.DD HH24:MI') STM_FIR_REG_DATE
+			 ,NVL((SELECT user_nm FROM ad_user_mst WHERE user_id = esch.STM_LAST_UPD_USER_ID), esch.STM_LAST_UPD_USER_ID) STM_LAST_UPD_USER_NM
+			 ,TO_CHAR(esch.stm_last_upd_date,'YYYY.MM.DD HH24:MI') stm_last_upd_date
+			 ,CASE WHEN  esch.upd_sts_fg_cd = '1' THEN 'Y'
+				   ELSE 'N'
+			END enableUpdate
+			 ,CASE WHEN   esch.to_goal_qty > 0 THEN 'N'
+				   ELSE 'Y'
+			END totTgtYn
+		FROM um_upd_plan_exe_sch_lst esch
+		   ,ad_comm_cd cd1
+		WHERE plan_id = #{planId}
+			AND cd1.comm_grp_cd = 'UPD_STS_FG_CD'
+			AND cd1.comm_cd = esch.upd_sts_fg_cd
+		<if test="schErrCnt != null">
+			AND EXISTS (
+				SELECT COUNT(*) FROM UM_UPD_PLAN_ERR_MST UUPEM
+				WHERE UUPEM.PLAN_ID = esch.PLAN_ID AND UUPEM.EXE_SCH_ID = esch.EXE_SCH_ID
+				GROUP BY UUPEM.EXE_SCH_ID, UUPEM.STB_ID, UUPEM.MAC_ADDR, UUPEM.ERR_CD
+				HAVING COUNT(*) <![CDATA[ >= ]]> #{schErrCnt}
+			)
+		</if>
+		<if test="schRegIds != null and schRegIds.size > 0">
+			AND EXISTS (SELECT 1 FROM UM_UPD_PLAN_EXE_SCH_LST UUEXE
+				WHERE UUEXE.PLAN_ID = esch.PLAN_ID
+				  	AND UUEXE.EXE_SCH_ID = esch.EXE_SCH_ID
+					AND (UUEXE.STM_FIR_REG_USER_ID IN
+					<foreach item="value" collection="schRegIds" open="(" close=")" separator=",">
+						#{value}
+					</foreach>
+					OR UUEXE.STM_LAST_UPD_USER_ID IN
+					<foreach item="value" collection="schRegIds" open="(" close=")" separator=",">
+						#{value}
+					</foreach>
+					)
+			)
+		</if>
+	</select>
+</mapper>

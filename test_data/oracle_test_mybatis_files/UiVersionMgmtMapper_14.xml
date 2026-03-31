@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.device.UiVersionMgmtMapper">
+
+    <select id="selectListUiVersionMgmt"
+    parameterType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO">
+
+    <![CDATA[
+    SELECT
+	     uuvm.stb_ui_ver
+	     ,uuvm.ui_ver_expl
+	     ,uuvm.use_yn
+	     ,uuvm.stm_fir_reg_date
+	     ,uuvm.stm_fir_reg_user_id
+	     ,aum.user_nm
+	     ,(select count(*) from um_sw_file_dtl d where d.stb_ui_ver = uuvm.stb_ui_ver) cnt
+	FROM dm_ui_ver_mst uuvm, ad_user_mst aum
+    WHERE 1=1
+    AND uuvm.stm_fir_reg_user_id = user_id
+
+    ]]>
+    <choose>
+        <when test="!fromUi.equals('') and !toUi.equals('')">
+            AND uuvm.stb_ui_ver between #{fromUi} and #{toUi}
+        </when>
+        <when test="!fromUi.equals('')">
+            <if test='version.equals("4")'>
+            AND uuvm.stb_ui_ver = #{fromUi}
+            </if>
+            <if test='version.equals("1")'>
+            AND uuvm.stb_ui_ver <![CDATA[>=]]> #{fromUi}
+            </if>
+            <if test='version.equals("2")'>
+            AND uuvm.stb_ui_ver <![CDATA[<=]]> #{fromUi}
+            </if>
+        </when>
+    </choose>
+    <if test="!stmFirRegUserId.equals('')">
+    AND aum.user_id like '%'||#{stmFirRegUserId}||'%'
+    </if>
+    ORDER BY uuvm.stm_last_upd_date desc
+
+    </select>
+    <select id="selectListStmFirRegUser"
+    parameterType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO">
+
+    <![CDATA[
+    SELECT
+          distinct uuvm.stm_fir_reg_user_id
+         ,aum.user_nm
+    FROM dm_ui_ver_mst uuvm, ad_user_mst aum
+    WHERE 1=1
+    AND uuvm.stm_fir_reg_user_id = user_id
+
+    ]]>
+
+    </select>
+
+
+    <select id="selectOneUiVersionMgmt"
+    parameterType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO">
+
+    <![CDATA[
+    SELECT
+         a.stb_ui_ver
+         ,a.ui_ver_expl
+         ,a.use_yn
+         ,a.stm_fir_reg_date
+         ,NVL(TO_CHAR(a.stm_fir_reg_date,'yyyy.MM.dd'),' ') stmFirRegDate
+         ,NVL(a.stm_fir_reg_user_id,' ') stmFirRegUserId
+         ,NVL(TO_CHAR(a.stm_last_upd_date,'yyyy.MM.dd'),' ') stmLastUpdDate
+         ,NVL(a.stm_last_upd_user_id,' ') stmLastUpdUserId
+         ,b.user_nm stm_fir_reg_user_nm
+         ,c.user_nm stm_last_upd_user_nm
+    FROM dm_ui_ver_mst a, ad_user_mst b , ad_user_mst c
+    WHERE a.stm_fir_reg_user_id = b.user_id(+)
+    AND   a.stm_fir_reg_user_id = c.user_id(+)
+    AND   a.stb_ui_ver = #{stbUiVer}
+    ]]>
+    </select>
+
+    <select id="selectOneUiVersionCheck"
+    parameterType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO"
+    resultType="int">
+
+    <![CDATA[
+    SELECT
+         count(*)
+    FROM dm_ui_ver_mst
+    WHERE stb_ui_ver = #{stbUiVer}
+    ]]>
+    </select>
+
+    <select id="selectListSwMst"
+    parameterType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO"
+    resultType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO">
+
+    <![CDATA[
+    SELECT
+          b.sw_file_nm
+         ,b.use_yn
+         ,b.sw_file_ver
+         ,b.stm_fir_reg_date
+         ,b.stm_fir_reg_user_id
+         ,a.user_nm
+    FROM um_sw_file_dtl b , ad_user_mst a
+    WHERE b.stm_fir_reg_user_id = a.user_id(+)
+    AND   b.stb_ui_ver = #{stbUiVer}
+    ORDER BY b.stm_fir_reg_date desc
+
+    ]]>
+    </select>
+
+    <insert id="insertUiVersion"
+    parameterType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO">
+
+    <![CDATA[
+    INSERT INTO dm_ui_ver_mst
+    (
+     stb_ui_ver
+    ,ui_ver_expl
+    ,use_yn
+    ,stm_fir_reg_date
+    ,stm_fir_reg_user_id
+    )
+VALUES
+    (
+     #{stbUiVer}
+    ,#{uiVerExpl}
+    ,#{useYn}
+    ,sysdate
+    ,#{userId}
+
+    )
+    ]]>
+
+    </insert>
+
+    <update id="updateUiVersion" parameterType="com.skb.edmp.admin.dto.device.UiVersionMgmtDTO">
+
+    UPDATE dm_ui_ver_mst
+    SET
+	    stb_ui_ver = #{stbUiVer}
+      , ui_ver_expl = #{uiVerExpl}
+      , use_yn = #{useYn}
+      , stm_last_upd_date = SYSDATE
+      , stm_last_upd_user_id = #{userId}
+    WHERE stb_ui_ver = #{stbUiVer}
+
+    </update>
+
+
+    <update id="deleteUiVersion" parameterType="String">
+    <![CDATA[
+    UPDATE dm_ui_ver_mst
+    SET del_yn = 'Y'
+    WHERE stb_ui_ver = #{stbUiVer}
+    ]]>
+
+    </update>
+
+	
+<!-- ////////////////////////////////////////	 -->
+<!-- 	       For Major UI Version -->
+<!-- ////////////////////////////////////////	 -->
+
+	 
+	<select id="selectListMajorUiVersionMgmt"
+	    parameterType="com.skb.edmp.admin.dto.device.UiMajorVersionMgmtDTO"
+	    resultType="com.skb.edmp.admin.dto.device.UiMajorVersionMgmtDTO">
+	
+	    <![CDATA[
+	    SELECT
+	         a.stb_full_ver
+	         ,a.stb_ui_ver
+	         ,a.stb_ui_ver_expl
+	         ,a.patch_dy
+	         ,a.stm_fir_reg_date
+	         ,NVL(TO_CHAR(a.stm_fir_reg_date,'yyyy.MM.dd'),' ') stmFirRegDate
+	         ,NVL(a.stm_fir_reg_user_id,' ') stmFirRegUserId
+	         ,NVL(TO_CHAR(a.stm_last_upd_date,'yyyy.MM.dd'),' ') stmLastUpdDate
+	         ,NVL(a.stm_last_upd_user_id,' ') stmLastUpdUserId
+	         ,aum.user_nm stmFirRegUserNm
+	    FROM dm_ui_ver_map a, ad_user_mst aum
+	    WHERE 1=1
+	    	AND a.stm_fir_reg_user_id = aum.user_id
+		    AND a.stb_ui_ver like '%'||#{stbUiVer}||'%'
+		    ]]>
+    	ORDER BY a.stm_last_upd_date desc
+	
+     </select>
+
+
+	 <select id="selectOneUiMajorVersionMgmt"
+	    parameterType="com.skb.edmp.admin.dto.device.UiMajorVersionMgmtDTO"
+	    resultType="com.skb.edmp.admin.dto.device.UiMajorVersionMgmtDTO">
+	
+	    <![CDATA[
+	    SELECT
+	         a.stb_full_ver
+	         ,a.stb_ui_ver
+	         ,a.stb_ui_ver_expl
+	         ,a.patch_dy
+	         ,a.stm_fir_reg_date
+	         ,NVL(TO_CHAR(a.stm_fir_reg_date,'yyyy.MM.dd'),' ') stmFirRegDate
+	         ,NVL(a.stm_fir_reg_user_id,' ') stmFirRegUserId
+	         ,NVL(TO_CHAR(a.stm_last_upd_date,'yyyy.MM.dd'),' ') stmLastUpdDate
+	         ,NVL(a.stm_last_upd_user_id,' ') stmLastUpdUserId
+             ,b.user_nm stm_fir_reg_user_nm
+	         ,c.user_nm stm_last_upd_user_nm
+	    FROM dm_ui_ver_map a, ad_user_mst b , ad_user_mst c
+	    WHERE 1=1
+	    AND   a.stb_full_ver like '%'||#{stbFullVer}||'%'
+	    AND   a.stm_fir_reg_user_id = b.user_id(+)
+	    AND   a.stm_fir_reg_user_id = c.user_id(+)
+	    ]]>
+    </select>
+
+
+	 <select id="selectOneMajorUiVersionCheck"
+	    parameterType="com.skb.edmp.admin.dto.device.UiMajorVersionMgmtDTO"
+	    resultType="int">
+	
+	    <![CDATA[
+	    SELECT
+	         count(*)
+	    FROM dm_ui_ver_map
+	    WHERE stb_full_ver = #{stbFullVer}
+	    ]]>
+	 </select>
+
+     <insert id="insertMajorUiVersion"
+		    parameterType="com.skb.edmp.admin.dto.device.UiMajorVersionMgmtDTO"
+		    >
+		
+		    <![CDATA[
+		    INSERT INTO dm_ui_ver_map
+		    (
+		    stb_full_ver
+		    ,stb_ui_ver
+		    ,stb_ui_ver_expl
+		    ,patch_dy
+		    ,stm_fir_reg_date
+		    ,stm_fir_reg_user_id
+		    ,stm_last_upd_date
+		    ,stm_last_upd_user_id
+		    )
+			VALUES
+		    (
+		     #{stbFullVer}
+		    ,#{stbUiVer}
+		    ,#{stbUiVerExpl}
+		    ,#{patchDy}
+		    ,sysdate
+		    ,#{stmFirRegUserId}
+			,sysdate
+		    ,#{stmFirRegUserId}
+		    )
+		    ]]>
+
+    </insert>
+
+	
+    <update id="updateMajorUiVersion" parameterType="com.skb.edmp.admin.dto.device.UiMajorVersionMgmtDTO">
+	    UPDATE dm_ui_ver_map                                                                         
+	    SET
+		  stb_ui_ver = #{stbUiVer}
+	      ,stb_ui_ver_expl = #{stbUiVerExpl}
+	      ,patch_dy = #{patchDy}
+	      ,stm_last_upd_date = sysdate
+	      ,stm_last_upd_user_id = #{stmLastUpdUserId}
+	    WHERE stb_full_ver = #{stbFullVer}
+    </update>
+
+	
+    <update id="deleteMajorUiVersion" parameterType="String">
+	    <![CDATA[
+	    DELETE 
+	    FROM dm_ui_ver_map
+	    WHERE stb_full_ver = #{stbUiVer}
+	    ]]>
+    </update>
+
+</mapper>

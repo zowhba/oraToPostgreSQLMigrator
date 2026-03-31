@@ -3,11 +3,13 @@ Interface A — 프로젝트-DB 매핑 설정 라우터
 """
 from fastapi import APIRouter, HTTPException
 
+from typing import Optional
 from backend.schemas.project import (
     ProjectCreateRequest,
     ProjectCreateResponse,
     ProjectListResponse,
     ConnectionTestResponse,
+    DBConfig,
 )
 from backend.services import project_service
 
@@ -32,8 +34,11 @@ async def get_project(project_id: str):
     proj = project_service.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail=f"프로젝트 '{project_id}'를 찾을 수 없습니다.")
-    # pw 마스킹하여 반환
+    
     cfg = proj["db_config"]
+    # 비밀번호 마스킹 - 값이 있으면 ********
+    masked_pw = "********" if cfg.pw else ""
+
     return {
         "status": "success",
         "project_id": proj["project_id"],
@@ -44,7 +49,7 @@ async def get_project(project_id: str):
             "db_name": cfg.db_name,
             "db_schema": cfg.db_schema or "",
             "user": cfg.user,
-            "pw": "****",
+            "pw": masked_pw,
         },
     }
 
@@ -59,8 +64,15 @@ async def delete_project(project_id: str):
 
 
 @router.post("/{project_id}/test-connection", response_model=ConnectionTestResponse)
-async def test_connection(project_id: str):
-    """DB 연결 테스트"""
-    result = project_service.test_db_connection(project_id)
-    # 연결 성공/실패 모두 200으로 반환 (프론트에서 connected 필드로 판단)
-    return result
+async def test_connection(project_id: str, config: Optional[DBConfig] = None):
+    """
+    DB 연결 테스트 
+    - body에 config가 있으면 해당 값으로 테스트
+    - body가 없으면 project_id로 저장된 설정 조회하여 테스트
+    """
+    if config:
+        # 화면 입력값으로 테스트하되, 비밀번호 복구를 위해 project_id도 함께 전달
+        return project_service.test_db_connection(project_id=project_id, config=config)
+    else:
+        # 저장된 값으로 테스트
+        return project_service.test_db_connection(project_id=project_id)

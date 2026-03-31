@@ -8,7 +8,14 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
-        changeOrigin: true
+        changeOrigin: true,
+        // 스트리밍을 위해 프록시 버퍼링 비활성화 지원 (http-proxy 옵션)
+        configure: (proxy, options) => {
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            // 백엔드의 SSE 헤더를 프론트엔드로 그대로 전달 보장
+            proxyRes.headers['x-accel-buffering'] = 'no';
+          });
+        }
       }
     }
   }

@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.device.DeviceModelMapper">
+
+  <select id="selectOneDeviceModlMst" parameterType="com.skb.edmp.admin.dto.device.DmDvcModlMstDTO" resultType="com.skb.edmp.admin.dto.device.DmDvcModlMstDTO">
+    <![CDATA[
+		SELECT
+			umSw.SW_NM AS recoverySwNM
+		    ,umSwFile.SW_FILE_VER AS recoverySwVer
+		    ,recoverySw.STM_FIR_REG_DATE
+			,(SELECT user_nm FROM ad_user_mst WHERE user_id = recoverySw.STM_FIR_REG_USER_ID) STM_FIR_REG_USER_NM
+		    ,recoverySw.STM_LAST_UPD_DATE
+		    ,(SELECT user_nm FROM ad_user_mst WHERE user_id = recoverySw.STM_LAST_UPD_USER_ID) STM_LAST_UPD_USER_NM
+		FROM UM_URG_RCVR_SW_MST recoverySw
+			,UM_SW_MST umSw
+			,UM_SW_FILE_DTL umSwFile
+		WHERE recoverySw.SW_ID = umSw.SW_ID
+			AND recoverySw.SW_FILE_ID = umSwFile.SW_FILE_ID	
+			AND recoverySw.modl_cd = #{modlCd}
+        ]]>
+  </select>
+
+  <select id="selectListDeviceModlMst" parameterType="com.skb.edmp.admin.dto.device.DmDvcModlMstDTO" resultType="com.skb.edmp.admin.dto.device.DmDvcModlMstDTO">
+    <![CDATA[
+          SELECT
+                 a.modl_cd
+                ,e.model_name as modlNm
+                ,a.use_yn
+                ,a.modl_fg_cd
+                ,(select cd_nm from ad_comm_cd where comm_cd = a.modl_fg_cd and comm_grp_cd = 'MODL_FG_CD') modl_fg_nm
+                ,a.modl_os_fg_cd
+                ,(select cd_nm from ad_comm_cd where comm_cd = a.modl_os_fg_cd and comm_grp_cd = 'MODL_OS_FG_CD') modl_os_fg_nm
+                ,a.modl_manufr_fg_cd
+                ,(select cd_nm from ad_comm_cd where comm_cd = a.modl_manufr_fg_cd and comm_grp_cd = 'MODL_MANUFR_FG_CD') modl_manufr_fg_nm
+                ,TO_CHAR(a.stm_last_upd_date,'YYYY.MM.DD HH24:MI') stm_last_upd_date
+                ,(SELECT user_nm FROM ad_user_mst WHERE user_id = a.stm_last_upd_user_id) stm_last_upd_user_nm
+                , a.modl_poc_cd
+            FROM dm_dvc_modl_mst a
+                ,stb_model e
+           WHERE a.modl_cd =  e.model_code
+        ]]>
+    <if test="stbCk != null and stbCk != '' ">
+      <choose>
+        <when test='stbCk.equals("Y")'>
+             AND substr(a.modl_cd,0,2) not in ('11','12')
+        </when>
+        <otherwise>
+             AND substr(a.modl_cd,0,2) in ('11','12')
+        </otherwise>
+      </choose>
+    </if>
+    <choose>
+      <when test="totalYn != null and totalYn != 'Y'.toString ">
+        <if test="txtModelNm != null and txtModelNm != '' ">
+              AND e.model_name LIKE    '%' ||  UPPER(#{txtModelNm}) || '%'
+        </if>
+        <if test="selectModlFgCd != null and selectModlFgCd.size > 0">
+              AND a.modl_fg_cd IN
+          <foreach item="value" collection="selectModlFgCd" open="(" close=")" separator=",">
+                      #{value}
+          </foreach>
+        </if>
+        <if test="selectModlOsFgCd != null and selectModlOsFgCd.size > 0">
+              AND a.modl_os_fg_cd IN
+          <foreach item="value" collection="selectModlOsFgCd" open="(" close=")" separator=",">
+                      #{value}
+          </foreach>
+        </if>
+        <if test="selectModlManufrFgCd !=null and selectModlManufrFgCd.size > 0">
+              AND a.modl_manufr_fg_cd IN
+          <foreach item="value" collection="selectModlManufrFgCd" open="(" close=")" separator=",">
+                      #{value}
+          </foreach>
+        </if>
+        <if test="selectUseYn !=null and selectUseYn != 'all' ">
+              AND a.use_yn = #{selectUseYn}
+        </if>
+      </when>
+    </choose>
+        ORDER BY a.stm_last_upd_date DESC
+
+  </select>
+
+  <select id="selectListDeviceModlMstSwFile" parameterType="com.skb.edmp.admin.dto.device.DmDvcModlMstDTO" resultType="com.skb.edmp.admin.dto.device.DmDvcModlMstDTO">
+    <![CDATA[
+          SELECT distinct
+                 a.modl_cd
+                ,e.model_name as modlNm
+                ,a.modl_poc_cd
+           FROM dm_dvc_modl_mst a 
+           		, um_sw_dvc_map m 
+           		, stb_model e
+           WHERE 1=1
+				AND a.modl_cd = m.modl_cd
+				AND a.modl_cd =  e.model_code
+				AND substr(a.modl_cd,0,2) not in ('11','12')
+				AND a.use_yn = 'Y'
+        ]]>
+    <if test="swId != null and swId != '' ">
+				AND m.sw_id = #{swId}
+    </if>
+            ORDER BY e.model_name ASC
+
+  </select>
+
+
+  <select id="selectListDeviceModlList" parameterType="com.skb.edmp.admin.dto.device.DmDvcModlMstDTO" resultType="com.skb.edmp.admin.dto.device.DmDvcModlMstDTO">
+    <![CDATA[
+        SELECT
+             a.modl_cd
+            ,b.model_name modlNm
+            ,a.modl_poc_cd
+        FROM dm_dvc_modl_mst a,stb_model b
+	    WHERE a.modl_cd = b.model_code
+		    AND substr(a.modl_cd,0,2) not in ('11','12')
+		    AND a.use_yn = 'Y'
+	        ]]>
+    <if test="modlNm != null and modlNm != '' ">
+	        AND UPPER(b.model_name) LIKE UPPER('%' || #{modlNm} || '%')
+    </if>
+        ORDER BY b.model_name ASC
+  </select>
+
+
+  <select id="selectListDeviceModlListWithRecovery" parameterType="com.skb.edmp.admin.dto.device.DmDvcModlMstDTO" resultType="com.skb.edmp.admin.dto.device.DmDvcModlMstDTO">
+    <![CDATA[
+		SELECT
+		     dmDvice.modl_cd
+		    ,stbModel.model_name modlNm
+		    ,recoverySwNM
+		    ,recoverySwVer
+			, (
+				SELECT count(*)
+				FROM UM_UPD_PLAN_STBL_VER_MAP planMap
+				WHERE planMap.MODL_CD = dmDvice.MODL_CD
+				  AND planMap.REQ_SVC = 'authbtv'
+			) mappingCnt
+			--------------------
+			,recoverySwId
+			,recoverySwFileId
+			,recoverySwFileVer
+			,etc
+			,renew_fg_cd
+			,edge_refresh_yn
+			--,case edge_refresh_yn when 'Y' then 'N' else 'Y' end edge_refresh_yn 
+			,sw_file_sz
+			,sw_upload_path_nm
+			,ver_file_sz
+			,ver_upload_path
+		FROM dm_dvc_modl_mst dmDvice
+				LEFT JOIN (
+					SELECT
+						recoverySw.MODL_CD
+						,umSw.SW_NM AS recoverySwNM
+					    ,umSwFile.SW_FILE_VER AS recoverySwVer
+					    ----------------------------
+					    ,recoverySw.sw_id AS recoverySwId
+					    ,recoverySw.sw_file_id AS recoverySwFileId
+					    ,recoverySw.sw_file_ver AS recoverySwFileVer
+					    ,recoverySw.etc
+					    ,recoverySw.edge_refresh_yn
+					    ,recoverySw.renew_fg_cd
+					    ,recoverySw.sw_file_sz
+					    ,recoverySw.sw_upload_path_nm
+					    ,recoverySw.ver_file_sz
+					    ,recoverySw.ver_upload_path
+					FROM UM_URG_RCVR_SW_MST recoverySw
+						,UM_SW_MST umSw
+						,UM_SW_FILE_DTL umSwFile
+						,(SELECT MODL_NM, max(STM_LAST_UPD_DATE) max_date FROM UM_URG_RCVR_SW_MST GROUP BY modl_nm) lastSw
+					WHERE recoverySw.SW_ID = umSw.SW_ID
+						AND recoverySw.SW_FILE_ID = umSwFile.SW_FILE_ID
+						AND recoverySw.modl_nm = lastSw.modl_nm AND recoverySw.stm_last_upd_date=lastSw.max_date
+				) recoveryT ON dmDvice.MODL_CD = recoveryT.MODL_CD
+			,stb_model stbModel
+		WHERE dmDvice.modl_cd = stbModel.model_code
+			AND substr(dmDvice.modl_cd,0,2) not in ('11','12')
+			AND dmDvice.use_yn = 'Y'
+	        ]]>
+    <if test="modlNm != null and modlNm != '' ">
+	        AND UPPER(stbModel.model_name) LIKE UPPER('%' || #{modlNm} || '%')
+    </if>
+		ORDER BY stbModel.model_name ASC
+  </select>
+
+  <select id="selectListAccModlMst" parameterType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO" resultType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO">
+    <![CDATA[
+      SELECT amst.acc_modl_id
+            ,amst.acc_modl_nm
+            ,amst.acc_modl_fg_nm
+            ,amst.modl_manufr_fg_cd
+            ,(select cd_nm from ad_comm_cd where comm_grp_cd='ACC_MODL_MANUFR_FG_CD' and comm_cd = amst.modl_manufr_fg_cd) modl_manufr_fg_nm
+            ,NVL(uuadm.acc_sw_ver, ' ') acc_sw_ver
+            ,amst.modl_introdc_dy
+            ,amst.acc_modl_desc
+            ,amst.use_yn
+            ,amst.stm_last_upd_date
+            ,amst.stm_last_upd_user_id
+            ,NVL((select user_nm from ad_user_mst where user_id = amst.stm_last_upd_user_id), amst.stm_last_upd_user_id) as stmLastUpdUserNm
+            ,amst.acc_sw_fil_modl_nm_loc_start
+            ,amst.acc_sw_fil_modl_nm_loc_end
+      FROM dm_acc_modl_mst amst,
+      (SELECT acc_modl_id, max(acc_sw_ver) acc_sw_ver FROM UM_UPD_ACC_DISTB_MST WHERE ACC_DISTB_STS_FG_CD ='02' GROUP BY acc_modl_id) uuadm
+      WHERE amst.acc_modl_id = uuadm.acc_modl_id (+)
+     ]]>
+    <choose>
+      <when test="totalYn != null and totalYn != 'Y'.toString ">
+        <if test="txtModelNm != null and txtModelNm != '' ">
+              AND amst.acc_modl_nm LIKE '%' || #{txtModelNm} || '%'
+        </if>
+        <if test="selectModlFgCd != null and selectModlFgCd.size > 0">
+              AND amst.acc_modl_fg_nm IN
+          <foreach item="value" collection="selectModlFgCd" open="(" close=")" separator=",">
+                      #{value}
+          </foreach>
+        </if>
+        <if test="selectModlManufrFgCd !=null and selectModlManufrFgCd.size > 0">
+              AND amst.modl_manufr_fg_cd IN
+          <foreach item="value" collection="selectModlManufrFgCd" open="(" close=")" separator=",">
+                      #{value}
+          </foreach>
+        </if>
+        <if test="selectUseYn !=null and selectUseYn != 'all' ">
+              AND amst.use_yn = #{selectUseYn}
+        </if>
+      </when>
+    </choose>
+        ORDER BY amst.stm_last_upd_date DESC
+  </select>
+
+  <select id="selectListAccModlFgNm" resultType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO">
+      select distinct(acc_modl_fg_nm) from dm_acc_modl_mst order by acc_modl_fg_nm
+  </select>
+
+  <select id="selectListAccModlList" parameterType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO" resultType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO">
+    <![CDATA[
+        SELECT
+            acc_modl_id
+            ,acc_modl_nm
+        FROM dm_acc_modl_mst
+	    WHERE use_yn = 'Y'
+	        ]]>
+    <if test="txtModelNm != null and txtModelNm != '' ">
+	        AND UPPER(acc_modl_nm) LIKE UPPER('%' || #{txtModelNm} || '%')
+    </if>
+        ORDER BY acc_modl_nm ASC
+  </select>
+
+  <select id="selectAccUseCheck" parameterType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO" resultType="int">
+      select count(acc_distb_id) from UM_UPD_ACC_DISTB_MST where ACC_MODL_ID = #{accModlId}
+  </select>
+
+  <select id="selectAccPlanCheck_old" parameterType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO" resultType="int">
+      select count(plan_id) from UM_UPD_PLAN_MST where modl_cd = #{accModlId}
+  </select>
+  <select id="selectAccPlanCheck" parameterType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO" resultType="int">
+      SELECT COUNT(ACC_DISTB_ID) DISTB_CNT
+      FROM UM_UPD_ACC_DISTB_MST
+      WHERE ACC_MODL_ID = #{accModlId}
+  </select>
+
+  <select id="selectListAccModlMstSwFile" parameterType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO" resultType="com.skb.edmp.admin.dto.device.DmAccModlMstDTO">
+    <![CDATA[
+        SELECT damm.acc_modl_id
+                ,damm.acc_modl_nm
+           FROM dm_acc_modl_mst damm 
+           		, um_sw_dvc_map usdm 
+           WHERE 1=1
+				AND usdm.modl_cd = damm.acc_modl_id
+				AND damm.use_yn = 'Y'
+      ]]>
+    <if test="swId != null and swId != '' ">
+				AND usdm.sw_id = #{swId}
+    </if>
+            ORDER BY damm.acc_modl_nm ASC
+
+  </select>
+
+</mapper>
+

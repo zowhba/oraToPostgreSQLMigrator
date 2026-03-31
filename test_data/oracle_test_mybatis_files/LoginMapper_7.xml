@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.common.LoginMapper">
+
+    <select id="selectOneUserMst"
+    parameterType="com.skb.edmp.admin.dto.common.UserDTO"
+    resultType="com.skb.edmp.admin.dto.common.UserDTO">
+
+    <![CDATA[
+    SELECT
+        m.user_id
+		,m.user_nm
+		,m.user_pwd
+		,m.user_typ_fg_cd
+		,m.user_co_fg_cd
+		,c.cd_nm as userCoFgNm
+		,m.user_email_addr
+		,m.user_bf_pwd
+		,NVL(TRUNC(SYSDATE - m.user_pwd_last_upd_date),0) user_pwd_last_upd_day
+		,m.user_pwd_last_upd_date
+		,m.del_yn
+		,m.use_yn
+		,NVL(TRUNC(SYSDATE - m.user_login_last_date),0) user_login_last_day
+		,m.user_login_last_date
+		,m.user_id_lock_yn
+		,m.login_fail_cnt
+		,m.join_aprv_sts_cd
+		,to_char(m.stm_fir_reg_date,'yyyy.MM.dd') stm_fir_reg_date
+        ,m.stm_fir_reg_user_id
+        ,to_char(m.stm_last_upd_date,'yyyy.MM.dd') stm_last_upd_date
+        ,m.stm_last_upd_user_id
+        ,b.join_aprv_req_msg
+        ,m.init_menu_id
+        ,mm.menu_path
+    FROM ad_user_mst m , ad_comm_cd c , ad_user_join_aprv_hst b , ad_menu_mst mm
+    WHERE m.user_id = #{userId}
+    AND   m.user_id = b.user_id
+    AND   m.user_co_fg_cd = c.comm_cd
+    AND   c.comm_grp_cd = 'USER_CO_FG_CD'
+    AND   m.init_menu_id = mm.menu_id(+)
+    AND   m.del_yn != 'Y'
+
+    ]]>
+    </select>
+
+    <select id="selectOneAprvCheck"
+    parameterType="com.skb.edmp.admin.dto.common.UserDTO"
+    resultType="String">
+
+    <![CDATA[
+    SELECT
+        join_aprv_sts_cd
+    FROM ad_user_mst
+    WHERE user_id = #{userId}
+
+
+    ]]>
+    </select>
+
+    <select id="selectOneUserPwd"
+    parameterType="com.skb.edmp.admin.dto.common.UserDTO"
+    resultType="String">
+
+    <![CDATA[
+    SELECT
+        user_pwd
+    FROM ad_user_mst
+    WHERE user_id = #{userId}
+
+
+    ]]>
+    </select>
+
+    <select id="selectOneConnDate"
+    parameterType="com.skb.edmp.admin.dto.common.UserDTO"
+    resultType="int">
+
+    <![CDATA[
+    SELECT
+        NVL(TRUNC(SYSDATE - MAX(user_conn_date)),0)
+    FROM ad_user_conn_log
+    WHERE user_id = #{userId}
+
+    ]]>
+    </select>
+
+    <update id="updateLoginLastDy" parameterType="com.skb.edmp.admin.dto.common.UserDTO">
+    <![CDATA[
+    UPDATE ad_user_mst
+    SET  user_login_last_date = SYSDATE
+        ,login_fail_cnt = 0
+    WHERE user_id = #{userId}
+    ]]>
+    </update>
+
+    <update id="updateLockCnt" parameterType="com.skb.edmp.admin.dto.common.UserDTO">
+    <![CDATA[
+    UPDATE ad_user_mst
+    SET login_fail_cnt = #{loginFailCnt}
+    WHERE user_id = #{userId}
+    ]]>
+    </update>
+
+    <update id="updateAllUserExpireDayLockYn" parameterType="com.skb.edmp.admin.dto.common.UserDTO">
+    <![CDATA[
+        /** 한 사용자가 로그인 시도 시,
+            모든 관리자의 사용자 로그인 최종 일자를 뒤져,
+            90일이 지난 사용자는 잠금 처리한다.
+            로그인 시도한 사용자도 해당 사용자 정보 확인 전에
+            전체 잠금 처리하여 해당 사용자가 90일 초과 되었으면 잠금처리 되도록 한다.
+         */
+        UPDATE AD_USER_MST
+           SET USER_ID_LOCK_YN = 'Y'
+             , JOIN_APRV_STS_CD = '3'
+             , STM_LAST_UPD_DATE = SYSDATE
+             , STM_LAST_UPD_USER_ID = #{userId}
+         WHERE NVL(TRUNC(SYSDATE - USER_LOGIN_LAST_DATE), 0) >= #{inactiveAccountLockPeriod}
+           AND USER_ID_LOCK_YN = 'N'
+           AND DEL_YN = 'N'
+           AND USE_YN = 'Y'
+    ]]>
+    </update>
+
+</mapper>

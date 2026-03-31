@@ -423,6 +423,7 @@ def execute_dry_run(db_config: DBConfig, converted_sql_xml: str) -> DryRunResult
             user=db_config.user,
             password=db_config.pw,
             connect_timeout=10,
+            sslmode='require'
         )
         conn.autocommit = False
 

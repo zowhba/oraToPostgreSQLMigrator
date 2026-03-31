@@ -175,7 +175,7 @@
                     type="password"
                     v-model="form.db_config.pw"
                     class="form-input"
-                    :placeholder="isNewProject ? '비밀번호 입력' : '변경 시에만 입력'"
+                    :placeholder="isNewProject ? '비밀번호 입력' : '기존 비밀번호 유지(********)'"
                   />
                 </div>
               </div>
@@ -192,7 +192,7 @@
                 type="button"
                 class="btn btn-secondary"
                 @click="handleTestConnection"
-                :disabled="!form.project_id || testingConnection || loading || isNewProject"
+                :disabled="!form.db_config.host || testingConnection || loading"
               >
                 <span v-if="testingConnection" class="btn-spinner"></span>
                 {{ testingConnection ? '테스트 중...' : 'DB 연결 테스트' }}
@@ -346,7 +346,7 @@ export default {
             db_name: response.db_config.db_name,
             db_schema: response.db_config.db_schema || '',
             user: response.db_config.user,
-            pw: '' // 비밀번호는 빈값으로 (변경 시에만 입력)
+            pw: response.db_config.pw // 백엔드에서 준 마스킹 값 (********) 적용
           }
         }
         this.showForm = true
@@ -462,7 +462,8 @@ export default {
       this.message = { type: '', text: '' }
 
       try {
-        const response = await testConnection(this.form.project_id)
+        // 화면의 입력값(this.form.db_config)을 전달하여 실시간 테스트
+        const response = await testConnection(this.form.project_id || 'temp', this.form.db_config)
 
         if (response.connected) {
           this.message = { type: 'success', text: response.message }

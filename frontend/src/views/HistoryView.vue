@@ -119,9 +119,9 @@
               <th>변환 일시</th>
               <th>프로젝트 명</th>
               <th>파일명</th>
-              <th>성공률</th>
+              <th>Dry-run 성공률</th>
               <th>소요시간</th>
-              <th>상태</th>
+              <th>난이도 분포</th>
               <th>기능</th>
             </tr>
           </thead>
@@ -139,8 +139,11 @@
               </td>
               <td>{{ item.duration }}초</td>
               <td>
-                <span :class="['status-dot', getAccuracyClass(item)]"></span>
-                {{ calculateAccuracy(item) }}%
+                <div class="level-mini-badges">
+                  <span class="m-badge m-success" title="Lv.1">{{ item.levels.l1 }}</span>
+                  <span class="m-badge m-warning" title="Lv.2">{{ item.levels.l2 }}</span>
+                  <span class="m-badge m-danger" title="Lv.3">{{ item.levels.l3 }}</span>
+                </div>
               </td>
               <td>
                 <button class="btn-text" @click="viewDetail(item)">결과 보기</button>

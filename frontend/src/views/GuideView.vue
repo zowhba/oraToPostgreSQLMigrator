@@ -254,8 +254,8 @@
         <div class="error-item">
           <div class="error-code">relation "xxx" does not exist</div>
           <div class="error-solution">
-            <strong>원인:</strong> 테이블이 해당 스키마에 없거나 스키마 설정 누락<br>
-            <strong>해결:</strong> 프로젝트 설정 → 스키마 필드에 올바른 스키마명 입력 (예: edmp)
+            <strong>원인:</strong> 테이블이 현재 검색 경로(search_path)에 없거나 실제 DB에 생성되지 않음<br>
+            <strong>해결:</strong> 프로젝트 설정 → 스키마 필드에 올바른 스키마명 입력. 여러 스키마를 사용하는 경우 쉼표(<code>,</code>)로 구분하여 모두 입력할 수 있습니다. (예: <code>schema1, schema2</code>)
           </div>
         </div>
         <div class="error-item">
@@ -273,10 +273,24 @@
           </div>
         </div>
         <div class="error-item">
-          <div class="error-code">syntax error at or near "xxx"</div>
+          <div class="error-code">syntax error at or near "xxx" (IN, UPPER 등)</div>
           <div class="error-solution">
-            <strong>원인:</strong> Oracle 전용 문법(ROWNUM, CONNECT BY, START WITH 등) 잔존<br>
-            <strong>해결:</strong> 변환된 SQL을 직접 수정. ROWNUM → LIMIT, CONNECT BY → recursive CTE
+            <strong>원인:</strong> MyBatis <code>&lt;foreach&gt;</code> 또는 <code>&lt;trim&gt;</code> 태그의 <code>open</code>, <code>prefix</code> 속성(예: <code>1 IN (</code>)이 누락됨<br>
+            <strong>해결:</strong> 최신 버전에서 자동 개선됨. 수동 수정 시 괄호<code>(</code>의 짝이 맞는지, 키워드가 누락되지 않았는지 확인
+          </div>
+        </div>
+        <div class="error-item">
+          <div class="error-code">syntax error at or near ".." (...)</div>
+          <div class="error-solution">
+            <strong>원인:</strong> 쿼리가 너무 길어 AI가 응답 시 뒷부분을 <code>...</code>으로 생략함<br>
+            <strong>해결:</strong> 쿼리를 작은 단위로 분리하거나, .env의 <code>LLM_MAX_TOKENS</code> 값을 상향 조정 (현재 4096 이상 권장)
+          </div>
+        </div>
+        <div class="error-item">
+          <div class="error-code">syntax error at or near "0" (0"&gt;)</div>
+          <div class="error-solution">
+            <strong>원인:</strong> MyBatis 태그 내 <code>test="val &gt; 0"</code> 등의 기호가 태그 제거 시 잔재로 남음<br>
+            <strong>해결:</strong> 최신 버전에서 자동 조치됨. 수동 수정 시 <code>"&gt;</code> 등의 기호가 SQL에 포함되지 않도록 주의
           </div>
         </div>
         <div class="error-item">

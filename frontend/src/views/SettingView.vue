@@ -152,9 +152,9 @@
                   type="text"
                   v-model="form.db_config.db_schema"
                   class="form-input"
-                  placeholder="비워두면 public 사용, 예: edmp"
+                  placeholder="비워두면 public 사용, 예: hanarocms, edmp"
                 />
-                <span class="form-hint">테이블이 public 외 특정 스키마에 있을 때 입력하세요</span>
+                <span class="form-hint">복수 스키마 입력 시 쉼표(,)로 구분하세요. (예: schema1, schema2)</span>
               </div>
 
               <div class="form-row">

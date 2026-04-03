@@ -17,6 +17,7 @@ class Config:
     # ── LLM 호출 설정 ──
     LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
     LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
+    LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))
     LLM_MOCK_MODE = os.getenv("LLM_MOCK_MODE", "false").lower() == "true"
 
     # ── Dry-run 설정 ──

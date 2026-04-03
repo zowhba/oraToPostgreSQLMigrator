@@ -140,7 +140,7 @@ def _strip_mybatis_tags(sql_xml: str) -> str:
     # 3. <choose> → 첫 번째 <when> 내용만 추출
     text = _process_choose(text)
 
-    # 4. <where> → WHERE
+    # 4. <where> → WHERE (MyBatis는 <where>태그 자체가 WHERE 키워드를 생성함)
     text = re.sub(r"<where\s*/?>", " WHERE ", text, flags=re.IGNORECASE)
     text = re.sub(r"</where\s*>", " ", text, flags=re.IGNORECASE)
 
@@ -148,33 +148,65 @@ def _strip_mybatis_tags(sql_xml: str) -> str:
     text = re.sub(r"<set\s*/?>", " SET ", text, flags=re.IGNORECASE)
     text = re.sub(r"</set\s*>", " ", text, flags=re.IGNORECASE)
 
-    # <trim prefix="..."> → 해당 키워드
-    def _replace_trim_open(m):
-        attrs = m.group(0)
-        prefix_match = re.search(r'prefix\s*=\s*["\'](\w+)["\']', attrs, re.IGNORECASE)
-        return f" {prefix_match.group(1)} " if prefix_match else " "
+    # <trim> 태그 처리 (prefix, suffix 속성 추출)
+    def _replace_trim(m):
+        attrs = m.group(1)
+        body = m.group(2)
+        
+        # prefix 추출 (공백, 특수문자 포함 가능하므로 [^"']+ 패턴 사용)
+        prefix_match = re.search(r'prefix\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        prefix = prefix_match.group(1) if prefix_match else ""
+        
+        # suffix 추출
+        suffix_match = re.search(r'suffix\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        suffix = suffix_match.group(1) if suffix_match else ""
+        
+        return f" {prefix} {body} {suffix} "
 
-    text = re.sub(r"<trim\s+[^>]*>", _replace_trim_open, text, flags=re.IGNORECASE)
-    text = re.sub(r"</trim\s*>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<trim\s+([^>]*?)>(.*?)</trim\s*>", _replace_trim, text, flags=re.IGNORECASE | re.DOTALL)
+
+    # <foreach> 태그 처리 (open, close 속성 추출)
+    def _replace_foreach(m):
+        attrs = m.group(1)
+        body = m.group(2)
+        
+        # open 속성 추출
+        open_match = re.search(r'open\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        open_val = open_match.group(1) if open_match else ""
+        
+        # close 속성 추출
+        close_match = re.search(r'close\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        close_val = close_match.group(1) if close_match else ""
+        
+        return f" {open_val} {body} {close_val} "
+
+    text = re.sub(r"<foreach\s+([^>]*?)>(.*?)</foreach\s*>", _replace_foreach, text, flags=re.IGNORECASE | re.DOTALL)
 
     # 5. 나머지 모든 MyBatis XML 태그 제거 (내부 SQL 텍스트는 보존)
-    #    <if ...>, </if>, <foreach ...>, </foreach>, <when ...>, </when>,
-    #    <otherwise>, </otherwise>, <select ...>, </select> 등
-    text = re.sub(r"</?[a-zA-Z][a-zA-Z0-9_]*(?:\s[^>]*)?>", " ", text)
+    #    <if ...>, </if>, <when ...>, </when>, <otherwise>, </otherwise>, <select ...>, </select> 등
+    #    주의: 속성값 내에 >, < 가 포함된 경우(예: test="val > 0")를 대비하여 
+    #    따옴표 내 문자열을 제대로 건너뛰는 정규식을 사용해야 함.
+    tag_pattern = r'</?[a-zA-Z][a-zA-Z0-9_]*(?:\s+[a-zA-Z0-9_]+\s*=\s*(?:"[^"]*"|\'[^\']*\'))*\s*/?>'
+    text = re.sub(tag_pattern, " ", text)
 
     # 6. SQL 연산자 복원
     text = _restore_sql_operators(text, restore_map)
 
-    # ★ 줄바꿈을 공백으로 합치기 전에 SQL 주석을 반드시 먼저 제거해야 함 ★
-    # 이유: "-- comment" 가 한 줄로 합쳐지면 그 이후 모든 SQL이 주석 처리됨
-    #       (예: "col1 -- alias\ncol2 FROM tbl" → "col1 -- alias col2 FROM tbl" → FROM 절이 주석에 포함)
-    # 6-1. SQL 블록 주석 제거 (/* ... */)
+    # ★ 줄바꿈을 공백으로 합치기 전에 주석을 반드시 먼저 제거해야 함 ★
+    # 6-1. XML 주석 제거 (<!-- ... -->)
+    text = re.sub(r"<!--.*?-->", " ", text, flags=re.DOTALL)
+    
+    # 6-2. SQL 블록 주석 제거 (/* ... */)
     text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
-    # 6-2. SQL 한 줄 주석 제거 (-- ... \n)  ← 반드시 \s+ 압축 전에 수행!
+    
+    # 6-3. SQL 한 줄 주석 제거 (-- ... \n)
     text = re.sub(r"--[^\n\r]*", " ", text)
 
-    # 연속 공백/줄바꿈 정리
+    # 연속 공백/줄바꿈 정리 (중요: 앞뒤 공백 완전 제거)
     text = re.sub(r"\s+", " ", text).strip()
+    
+    # 불필요한 특수문자 찌꺼기(<! 등)가 앞에 남은 경우 제거
+    text = re.sub(r'^[^a-zA-Z]+', '', text)
 
     # 7. <where> 없는 경우 WHERE 자동 주입
     text = _inject_where_if_missing(text)
@@ -200,8 +232,11 @@ def _substitute_mybatis_params(sql: str) -> str:
 
 
 def _detect_statement_type(sql: str) -> str:
-    """SQL 문 종류 판별"""
-    upper = sql.strip().upper()
+    """SQL 문 종류 판별 (선행 기호 무시)"""
+    # 앞쪽의 특수문자나 기호를 제거하고 영문자로 시작하는 지점부터 판별
+    clean_sql = re.sub(r'^[^a-zA-Z]+', '', sql.strip())
+    upper = clean_sql.upper()
+    
     if upper.startswith("SELECT"):
         return "SELECT"
     elif upper.startswith("INSERT"):
@@ -298,14 +333,17 @@ def _build_error_hint(error_msg: str, executed_sql: str) -> str:
 
     # ── 타입 불일치 ──
     if "operator does not exist" in msg_lower or "type mismatch" in msg_lower or "cannot be cast" in msg_lower:
-        return (
+        hint_msg = (
             "📌 **원인**: 데이터 타입이 맞지 않아 비교 또는 연산이 불가능합니다.\n\n"
             "💡 **해결 방법**:\n"
-            "  - Oracle의 `VARCHAR2`는 PostgreSQL의 `VARCHAR` 또는 `TEXT`에 대응합니다\n"
-            "  - `NUMBER` 타입 비교 시 적절한 CAST (`::integer`, `::numeric`)를 추가하세요\n"
-            "  - `DATE`/`TIMESTAMP` 타입 연산 방식이 Oracle과 다를 수 있습니다\n"
-            "  - 명시적 타입 캐스팅(`CAST(col AS type)` 또는 `col::type`)을 검토하세요"
+            "  - 오류 위치의 컬럼과 비교 대상의 타입이 일치하는지 확인하세요.\n"
+            "  - PostgreSQL은 숫자와 문자열의 자동 형변환을 지원하지 않습니다.\n"
+            "  - 명시적 타입 캐스팅(`::text`, `::integer`, `::numeric`)을 추가하세요.\n"
+            "  - 예: `id_column::text = '1'` 또는 `id_column = 1::integer`"
         )
+        if "1 in (" in msg_lower and "upper" in msg_lower:
+            hint_msg += "\n  - 특히 `1 IN (UPPER(...))` 등에서 `1::text` 로 변경이 필요할 수 있습니다."
+        return hint_msg
 
     # ── 권한 없음 ──
     if "permission denied" in msg_lower or "access denied" in msg_lower:
@@ -369,6 +407,29 @@ def _build_error_hint(error_msg: str, executed_sql: str) -> str:
             "  - LLM이 잘못된 형태의 SQL을 생성했다면 수동으로 수정이 필요합니다"
         )
 
+    # ── 기본 fallback 전, 쿼리 내 특이 기호 패턴 감지 (생략 또는 태그 잔재) ──
+    sql_upper = executed_sql.upper()
+    
+    # 1. 말줄임표 (...) 감지 — 쿼리 잘림 현상
+    if "..." in executed_sql:
+        return (
+            "📌 **원인**: 변환된 SQL에 `...` (말줄임표)가 포함되어 있어 구문 오류가 발생했습니다.\n\n"
+            "💡 **해결 방법**:\n"
+            "  - 쿼리가 너무 길어 AI가 응답 도중 내용을 생략했을 가능성이 높습니다.\n"
+            "  - 쿼리를 작게 분리하거나, AI 설정(Max Tokens)을 확인하세요.\n"
+            "  - 직접 SQL 편집 탭에서 `...` 부분을 실제 쿼리로 복구해야 합니다."
+        )
+
+    # 2. XML 태그 잔재 (">, 0">) 감지 — 태그 제거 실패
+    if "\">" in executed_sql or "0\">" in executed_sql:
+        return (
+            "📌 **원인**: MyBatis XML 태그의 일부(`\">` 등)가 SQL에 남아 있습니다.\n\n"
+            "💡 **해결 방법**:\n"
+            "  - 태그 속성값 내의 특수문자 처리가 올바르지 않아 시스템이 태그를 완전히 제거하지 못했습니다.\n"
+            "  - `0\">` 또는 `\">`와 같은 불필요한 문자를 직접 제거하세요.\n"
+            "  - 원본 XML의 `<if test=\"...\">` 구문 주위를 확인하십시오."
+        )
+
     # ── 기본 fallback ──
     return (
         "📌 **원인**: SQL 실행 중 예상치 못한 오류가 발생했습니다.\n\n"
@@ -430,12 +491,17 @@ def execute_dry_run(db_config: DBConfig, converted_sql_xml: str) -> DryRunResult
         try:
             cur = conn.cursor()
 
-            # search_path 설정 (스키마 지정 시 — 테이블을 해당 스키마에서 검색)
-            schema = db_config.db_schema
-            if schema and schema.strip():
-                safe_schema = schema.strip().replace('"', '')  # SQL injection 방지
-                cur.execute(f'SET search_path TO "{safe_schema}", public')
-                logger.debug("[DryRun] search_path = %s", safe_schema)
+            # search_path 설정 (사용자 지정 스키마들 + public)
+            # 쉼표(,)로 구분된 복수 스키마 지원
+            schema_str = db_config.db_schema or ""
+            schemas = [s.strip() for s in schema_str.replace('"', '').split(",") if s.strip()]
+            
+            if "public" not in [s.lower() for s in schemas]:
+                schemas.append("public")
+            
+            safe_schemas_str = ", ".join([f'"{s}"' for s in schemas])
+            cur.execute(f"SET search_path TO {safe_schemas_str}")
+            logger.debug("[DryRun] search_path = %s", safe_schemas_str)
 
             # Statement timeout 설정 (무한 대기 방지)
             timeout_ms = Config.DRYRUN_STATEMENT_TIMEOUT_MS

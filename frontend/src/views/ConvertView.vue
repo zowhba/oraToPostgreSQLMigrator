@@ -15,8 +15,6 @@
         @file-parsed="handleFileParsed"
         :disabled="!project.project_id"
       />
-
-      />
     </div>
 
     <!-- 변환 버튼 및 상태 -->

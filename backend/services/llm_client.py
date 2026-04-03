@@ -34,7 +34,9 @@ def _build_system_prompt() -> str:
     return (
         "당신은 Oracle → PostgreSQL 마이그레이션 전문가입니다. "
         "MyBatis XML 쿼리를 PostgreSQL 호환으로 변환하세요. "
-        "반드시 지정된 JSON 형식으로만 응답하세요."
+        "반드시 지정된 JSON 형식으로만 응답하세요. "
+        "★ 중요: 절대로 쿼리 내용을 생략하거나 말줄임표(...)를 사용하지 마십시오. "
+        "전체 SQL을 처음부터 끝까지 완전하게 작성하십시오."
     )
 
 
@@ -71,6 +73,10 @@ def _build_user_prompt(original_sql_xml: str, schema_context: str, tag_name: str
    - 날짜 ± N일: Oracle의 date + 1 = 하루 후 → PostgreSQL date + INTERVAL '1 day'
    - MONTHS_BETWEEN(d1, d2) → EXTRACT(YEAR FROM AGE(d1, d2)) * 12 + EXTRACT(MONTH FROM AGE(d1, d2))
    - ADD_MONTHS(d, n) → d + (n || ' months')::INTERVAL
+8. ★ 타입 캐스팅 및 NULL 비교 (매우 중요):
+   - PostgreSQL은 타입 비교에 매우 엄격합니다. 숫자(NUMBER)와 문자열(VARCHAR)을 비교할 경우 반드시 명시적 캐스팅을 추가하세요. (예: `col_int::text = '1'`, `col_text = 1::text`, `1::text IN (UPPER(...))` 등)
+   - `IN` 절 내의 리터럴과 컬럼 타입을 반드시 일치시키거나 캐스팅을 추가하세요.
+   - `col = NULL`은 항상 `col IS NULL`로 변환하고, `col != NULL`은 `col IS NOT NULL`로 변환하십시오.
 
 
 ## 응답 형식 (반드시 아래 JSON으로만):
@@ -129,7 +135,14 @@ def convert_query(
     }
 
     api_url = Config.AI_ENDPOINT
-    if "/deployments/" not in api_url and Config.AI_DEPLOY_MODEL:
+    # OpenAI 표준 규격(/v1/) 또는 이미 완성된 URL인지 체크
+    if "/chat/completions" in api_url.lower():
+        pass
+    elif "/v1" in api_url.lower():
+        # OpenAI 표준 API 규격을 따르는 경우 (예: Azure API Gateway 등)
+        api_url = f"{api_url.rstrip('/')}/chat/completions"
+    elif "/deployments/" not in api_url and Config.AI_DEPLOY_MODEL:
+        # 일반적인 Azure OpenAI 직접 호출 엔드포인트인 경우
         api_url = (
             f"{api_url.rstrip('/')}/openai/deployments/"
             f"{Config.AI_DEPLOY_MODEL}/chat/completions"
@@ -137,6 +150,7 @@ def convert_query(
         )
 
     payload = {
+        "model": Config.AI_DEPLOY_MODEL,
         "messages": [
             {"role": "system", "content": _build_system_prompt()},
             {
@@ -144,7 +158,8 @@ def convert_query(
                 "content": _build_user_prompt(original_sql_xml, schema_context, tag_name),
             },
         ],
-        "temperature": 0,
+        # "temperature": 0,  # 최신 모델(O1/GPT-5 등)은 temperature를 지원하지 않거나 1만 허용함
+        "max_completion_tokens": Config.LLM_MAX_TOKENS,
         "response_format": {"type": "json_object"},
     }
 

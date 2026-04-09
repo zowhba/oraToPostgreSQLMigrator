@@ -13,6 +13,10 @@
         <span class="nav-icon">&#9881;</span>
         <span class="nav-text">프로젝트 설정</span>
       </router-link>
+      <router-link to="/global-settings" class="nav-item" :class="{ active: $route.path === '/global-settings' }">
+        <span class="nav-icon">&#127760;</span>
+        <span class="nav-text">전역 설정</span>
+      </router-link>
       <router-link to="/convert" class="nav-item" :class="{ active: $route.path === '/convert' }">
         <span class="nav-icon">&#8644;</span>
         <span class="nav-text">쿼리 변환</span>

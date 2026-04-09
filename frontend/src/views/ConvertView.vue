@@ -57,7 +57,12 @@
 
     <!-- 결과 테이블 -->
     <div class="section-card" v-if="results.length > 0">
-      <h3 class="section-title">변환 결과</h3>
+      <div class="section-title-row">
+        <h3 class="section-title">변환 결과</h3>
+        <span class="model-info-badge" v-if="usedModel">
+          사용 모델: <strong>{{ usedModel }}</strong>
+        </span>
+      </div>
       <QueryTable
         :queries="results"
         @select="handleSelectQuery"
@@ -111,7 +116,8 @@ export default {
       loading: false,
       progress: 0,
       statusMessage: '',
-      estimatedTime: 0
+      estimatedTime: 0,
+      usedModel: ''
     }
   },
   mounted() {
@@ -148,6 +154,7 @@ export default {
         original_sql_xml: q.original_sql_xml
       }))
       this.results = data.queries
+      this.usedModel = data.used_model || ''
       this.selectedQuery = null
     },
 
@@ -167,6 +174,7 @@ export default {
       this.statusMessage = '변환 준비 중...'
       this.estimatedTime = this.queries.length * 5 // 초기 예상
       this.results = [] // 시작 시 결과 초기화
+      this.usedModel = ''
 
       try {
         const requestData = {
@@ -189,6 +197,7 @@ export default {
           } else if (chunk.type === 'complete') {
             this.progress = 100
             this.statusMessage = '변환이 완료되었습니다.'
+            this.usedModel = chunk.final_response.used_model || ''
           }
         })
 
@@ -531,5 +540,29 @@ export default {
   font-size: 12px;
   color: #a0aec0;
   margin: 0;
+}
+
+.section-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.section-title-row .section-title {
+  margin-bottom: 0;
+}
+
+.model-info-badge {
+  font-size: 12px;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.model-info-badge strong {
+  color: #4f46e5;
 }
 </style>

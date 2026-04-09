@@ -13,11 +13,12 @@ class Config:
     AI_API_KEY = os.getenv("AI_API_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
     AI_ENDPOINT = os.getenv("AI_ENDPOINT") or os.getenv("AZURE_OPENAI_ENDPOINT")
     AI_API_VERSION = os.getenv("AI_API_VERSION", "2024-12-01-preview")
+    CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 
     # ── LLM 호출 설정 ──
     LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
     LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
-    LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+    LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
     LLM_MOCK_MODE = os.getenv("LLM_MOCK_MODE", "false").lower() == "true"
 
     # ── Dry-run 설정 ──

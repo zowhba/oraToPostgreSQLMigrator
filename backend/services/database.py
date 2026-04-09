@@ -85,12 +85,14 @@ def init_tables():
             l2_count       INTEGER DEFAULT 0,
             l3_count       INTEGER DEFAULT 0,
             duration_seconds FLOAT DEFAULT 0,
+            used_model     VARCHAR(100),
             created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
     # 기존 테이블 마이그레이션
     cur.execute("ALTER TABLE conversions ADD COLUMN IF NOT EXISTS duration_seconds FLOAT DEFAULT 0")
+    cur.execute("ALTER TABLE conversions ADD COLUMN IF NOT EXISTS used_model VARCHAR(100)")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS query_conversions (
@@ -107,6 +109,21 @@ def init_tables():
             ai_guide_report    TEXT,
             created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            setting_key   VARCHAR(100) PRIMARY KEY,
+            setting_value TEXT NOT NULL,
+            updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 기본 모델 설정 (gpt-5.2-chat)
+    cur.execute("""
+        INSERT INTO app_settings (setting_key, setting_value)
+        VALUES ('active_model', 'gpt-5.2-chat')
+        ON CONFLICT (setting_key) DO NOTHING
     """)
 
     cur.close()

@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.api.project_router import router as project_router
 from backend.api.convert_router import router as convert_router
+from backend.api.settings_router import router as settings_router
 from backend.services import database as app_db
 from backend.utils.config import Config
 
@@ -157,6 +158,7 @@ async def log_request_response(request: Request, call_next):
 # ── 라우터 등록 ──
 app.include_router(project_router)
 app.include_router(convert_router)
+app.include_router(settings_router)
 
 
 @app.get("/", tags=["Health"])

@@ -224,10 +224,14 @@ def stream_conversion(request: ConvertRequest):
     end_time = time.time()
     duration = round(end_time - start_time, 2)
 
+    # 활성 모델 정보 가져오기
+    active_model = llm_client._get_active_model()
+
     response = ConvertResponse(
         project_id=request.project_id,
         xml_file_name=request.xml_file_name,
         duration_seconds=duration,
+        used_model=active_model,
         queries=results,
     )
     history_service.save_conversion_history(request, response)

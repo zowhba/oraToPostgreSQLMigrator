@@ -81,4 +81,5 @@ class ConvertResponse(BaseModel):
     project_id: str
     xml_file_name: str = Field("", description="원본 파일명")
     duration_seconds: float = Field(0.0, description="전체 변환 소요 시간")
+    used_model: Optional[str] = Field(None, description="변환에 사용된 LLM 모델명")
     queries: list[QueryResult]

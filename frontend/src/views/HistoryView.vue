@@ -11,11 +11,11 @@
           <button 
             :class="['toggle-btn', { active: viewMode === 'hierarchy' }]" 
             @click="viewMode = 'hierarchy'"
-          >계층형 버전</button>
+          >계층형</button>
           <button 
             :class="['toggle-btn', { active: viewMode === 'list' }]" 
             @click="viewMode = 'list'"
-          >최신순 버전</button>
+          >최신순</button>
         </div>
         <button class="btn btn-secondary" @click="refreshHistory" :disabled="loading">
           <span v-if="loading" class="btn-spinner"></span>
@@ -74,6 +74,7 @@
                     <th>쿼리 수</th>
                     <th>Dry-run 성공</th>
                     <th>소요 시간</th>
+                    <th>LLM 모델</th>
                     <th>난이도 분포</th>
                     <th>기능</th>
                   </tr>
@@ -89,6 +90,7 @@
                         <span class="bar-text">{{ attempt.success }}/{{ attempt.total }}</span>
                       </div>
                     </td>
+                    <td><span class="model-badge">{{ attempt.used_model || '-' }}</span></td>
                     <td class="attempt-duration">{{ attempt.duration }}초</td>
                     <td>
                       <div class="level-mini-badges">
@@ -120,6 +122,7 @@
               <th>프로젝트 명</th>
               <th>파일명</th>
               <th>Dry-run 성공률</th>
+              <th>LLM 모델</th>
               <th>소요시간</th>
               <th>난이도 분포</th>
               <th>기능</th>
@@ -137,8 +140,9 @@
                   <span class="bar-text">{{ item.success }}/{{ item.total }}</span>
                 </div>
               </td>
-              <td>{{ item.duration }}초</td>
-              <td>
+                <td><span class="model-badge">{{ item.used_model || '-' }}</span></td>
+                <td>{{ item.duration }}초</td>
+                <td>
                 <div class="level-mini-badges">
                   <span class="m-badge m-success" title="Lv.1">{{ item.levels.l1 }}</span>
                   <span class="m-badge m-warning" title="Lv.2">{{ item.levels.l2 }}</span>
@@ -171,7 +175,7 @@ export default {
   data() {
     return {
       loading: false,
-      viewMode: 'hierarchy', // 'hierarchy' or 'list'
+      viewMode: 'list', // 'hierarchy' or 'list'
       projects: [],
       flatHistory: [],
       expandedProjects: {},
@@ -610,5 +614,16 @@ export default {
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-right: 10px;
+}
+
+.model-badge {
+  background: #f1f5f9;
+  color: #475569;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-block;
+  border: 1px solid #e2e8f0;
 }
 </style>

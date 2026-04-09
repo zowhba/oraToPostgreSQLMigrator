@@ -27,8 +27,8 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
         cur.execute(
             """
             INSERT INTO conversions (
-                project_id, xml_file_name, total_queries, l1_count, l2_count, l3_count, duration_seconds
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                project_id, xml_file_name, total_queries, l1_count, l2_count, l3_count, duration_seconds, used_model
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING conversion_id
             """,
             (
@@ -38,7 +38,8 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
                 l1_count,
                 l2_count,
                 l3_count,
-                response.duration_seconds
+                response.duration_seconds,
+                response.used_model
             )
         )
         conversion_id = cur.fetchone()[0]
@@ -97,6 +98,7 @@ def get_history_hierarchy() -> List[Dict]:
                 c.total_queries, 
                 c.l1_count, c.l2_count, c.l3_count, 
                 c.duration_seconds, 
+                c.used_model,
                 c.created_at,
                 (SELECT COUNT(*) FROM query_conversions qc WHERE qc.conversion_id = c.conversion_id AND qc.dry_run_success = TRUE) as success_count
             FROM conversions c
@@ -134,6 +136,7 @@ def get_history_hierarchy() -> List[Dict]:
                 "total": row['total_queries'],
                 "success": row['success_count'],
                 "duration": row['duration_seconds'],
+                "used_model": row['used_model'],
                 "levels": {
                     "l1": row['l1_count'],
                     "l2": row['l2_count'],
@@ -173,6 +176,7 @@ def get_history_list() -> List[Dict]:
                 c.total_queries, 
                 c.l1_count, c.l2_count, c.l3_count, 
                 c.duration_seconds, 
+                c.used_model,
                 c.created_at,
                 (SELECT COUNT(*) FROM query_conversions qc WHERE qc.conversion_id = c.conversion_id AND qc.dry_run_success = TRUE) as success_count
             FROM conversions c
@@ -194,6 +198,7 @@ def get_history_list() -> List[Dict]:
                 "total": row['total_queries'],
                 "success": row['success_count'],
                 "duration": row['duration_seconds'],
+                "used_model": row['used_model'],
                 "levels": {
                     "l1": row['l1_count'],
                     "l2": row['l2_count'],

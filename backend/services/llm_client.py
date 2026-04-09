@@ -10,8 +10,20 @@ from typing import Optional
 import requests
 
 from backend.utils.config import Config
+from backend.services import database as app_db
 
 logger = logging.getLogger(__name__)
+
+def _get_active_model() -> str:
+    """DB에서 현재 활성화된 모델명을 가져옵니다."""
+    try:
+        conn = app_db.get_connection()
+        with conn.cursor() as cur:
+            cur.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'active_model'")
+            row = cur.fetchone()
+            return row[0] if row else "gpt-5.2-chat"
+    except Exception:
+        return "gpt-5.2-chat"
 
 # ── Mock 응답 (테스트용) ──
 _MOCK_RESPONSE = {
@@ -34,7 +46,8 @@ def _build_system_prompt() -> str:
     return (
         "당신은 Oracle → PostgreSQL 마이그레이션 전문가입니다. "
         "MyBatis XML 쿼리를 PostgreSQL 호환으로 변환하세요. "
-        "반드시 지정된 JSON 형식으로만 응답하세요. "
+        "반드시 지정된 JSON 형식으로만 응답하며, JSON 외부에 어떠한 인사말이나 부연 설명도 하지 마십시오. "
+        "AI 분석 리포트는 변환 난이도에 따라 조정하십시오. 완벽한 자동 변환이 가능한 경우 핵심 주의사항만 짧게 작성하고, 수동 개입이 필요한 복잡한 경우에만 상세히 기술하십시오. "
         "★ 중요: 절대로 쿼리 내용을 생략하거나 말줄임표(...)를 사용하지 마십시오. "
         "전체 SQL을 처음부터 끝까지 완전하게 작성하십시오."
     )
@@ -64,8 +77,9 @@ def _build_user_prompt(original_sql_xml: str, schema_context: str, tag_name: str
 3. 데이터타입 변환: NUMBER→NUMERIC, VARCHAR2→VARCHAR, CLOB→TEXT, DATE→TIMESTAMP 등
 4. Oracle 힌트(/*+ ... */) 제거 또는 PostgreSQL 호환 주석 변환
 5. 시퀀스, 듀얼 테이블(FROM DUAL 제거) 처리
-6. 속성값 내 따옴표 처리: MyBatis 태그의 test 속성 등에서 문자열 리터럴은 &quot; 대신 홑따옴표(')를 사용하십시오. (예: <if test="name == 'A'">)
-7. ★ 날짜 연산 타입 차이 (반드시 준수):
+6. Oracle CALLABLE({{CALL ...}}) 변환: PostgreSQL에서는 함수(FUNCTION)인 경우 SELECT func_name(args)을 사용하고, 프로시저(PROCEDURE, PG 11+)인 경우 CALL proc_name(args)을 사용하십시오. OUT 파라미터가 있는 경우 PG 함수는 결과를 반환하므로 적절히 대응하십시오.
+7. 속성값 내 따옴표 처리: MyBatis 태그의 test 속성 등에서 문자열 리터럴은 &quot; 대신 홑따옴표(')를 사용하십시오. (예: <if test="name == 'A'">)
+8. ★ 날짜 연산 타입 차이 (반드시 준수):
    - Oracle에서 날짜 - 날짜 = NUMBER(일수). PostgreSQL에서는 TIMESTAMP - TIMESTAMP = INTERVAL
    - TRUNC(date1 - date2) → EXTRACT(DAY FROM (date1 - date2))::INTEGER
    - TRUNC(SYSDATE - col) → EXTRACT(DAY FROM (CURRENT_TIMESTAMP - col))::INTEGER
@@ -73,7 +87,7 @@ def _build_user_prompt(original_sql_xml: str, schema_context: str, tag_name: str
    - 날짜 ± N일: Oracle의 date + 1 = 하루 후 → PostgreSQL date + INTERVAL '1 day'
    - MONTHS_BETWEEN(d1, d2) → EXTRACT(YEAR FROM AGE(d1, d2)) * 12 + EXTRACT(MONTH FROM AGE(d1, d2))
    - ADD_MONTHS(d, n) → d + (n || ' months')::INTERVAL
-8. ★ 타입 캐스팅 및 NULL 비교 (매우 중요):
+9. ★ 타입 캐스팅 및 NULL 비교 (매우 중요):
    - PostgreSQL은 타입 비교에 매우 엄격합니다. 숫자(NUMBER)와 문자열(VARCHAR)을 비교할 경우 반드시 명시적 캐스팅을 추가하세요. (예: `col_int::text = '1'`, `col_text = 1::text`, `1::text IN (UPPER(...))` 등)
    - `IN` 절 내의 리터럴과 컬럼 타입을 반드시 일치시키거나 캐스팅을 추가하세요.
    - `col = NULL`은 항상 `col IS NULL`로 변환하고, `col != NULL`은 `col IS NOT NULL`로 변환하십시오.
@@ -92,9 +106,84 @@ def _build_user_prompt(original_sql_xml: str, schema_context: str, tag_name: str
     "unconverted_items": ["변환하지 못한 Oracle 전용 요소 목록 (없으면 빈 배열)"],
     "confidence": 0.0에서 1.0 사이의 변환 확신도
   }},
-  "ai_guide_report": "전문가에게 제공할 상세 가이드 (변환 근거, 주의사항, 추가 검토 필요 항목)"
+  "ai_guide_report": "리포트 작성 가이드: 1) 단순 자동 변환(확신도 0.9 이상)인 경우: '주의사항/테스트 권장사항/변환확신도'만 3~5줄로 요약. 2) 복잡하거나 수동 개입 필요시: 변환 근거 및 변경 사항을 포함한 상세 Markdown 리포트 작성."
 }}
 """
+
+
+def _call_claude(model: str, system_prompt: str, user_prompt: str) -> dict:
+    """Anthropic Claude API를 호출합니다."""
+    if not Config.CLAUDE_API_KEY:
+        raise ValueError("CLAUDE_API_KEY가 설정되지 않았습니다.")
+
+    headers = {
+        "x-api-key": Config.CLAUDE_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    
+    # 모델명 매핑 (2026년 최신 Claude 4.x 모델 지원)
+    model_id = {
+        "haiku-4.5": "claude-haiku-4-5",
+        "sonnet-4.5": "claude-sonnet-4-5",
+        "opus-4.6": "claude-opus-4-6"
+    }.get(model, model)
+
+    payload = {
+        "model": model_id,
+        "max_tokens": Config.LLM_MAX_TOKENS,
+        "system": system_prompt,
+        "messages": [
+            {"role": "user", "content": user_prompt}
+        ]
+    }
+
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers=headers,
+        json=payload,
+        timeout=Config.LLM_TIMEOUT_SECONDS
+    )
+    
+    if resp.status_code == 400:
+        error_data = resp.json()
+        error_msg = error_data.get("error", {}).get("message", "")
+        if "credit balance" in error_msg.lower():
+            raise ValueError(f"Claude API 계정의 잔액이 부족합니다. (Billing issue: {error_msg})")
+        raise Exception(f"Claude API Invalid Request (400): {resp.text}")
+    
+    if resp.status_code != 200:
+        raise Exception(f"Claude API Error {resp.status_code}: {resp.text}")
+    
+    result = resp.json()
+    content = result["content"][0]["text"]
+    
+    # JSON 추출 고도화 (마크다운 백택 및 기타 텍스트 혼입 대응)
+    try:
+        # 1. 시도: 전체 내용에서 가장 바깥쪽 { } 찾기
+        start_idx = content.find('{')
+        end_idx = content.rfind('}')
+        
+        if start_idx != -1 and end_idx != -1:
+            json_str = content[start_idx:end_idx+1]
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                # 2. 시도: 만약 뒤에 다른 중괄호가 섞여서 실패하는 경우(Extra data 등), 
+                # 앞에서부터 하나씩 잘라가며 첫 번째 유효한 JSON 객체 찾기
+                for i in range(end_idx, start_idx, -1):
+                    try:
+                        return json.loads(content[start_idx:i+1])
+                    except json.JSONDecodeError:
+                        continue
+        
+        return json.loads(content)
+    except json.JSONDecodeError as e:
+        logger.error(f"[Claude] JSON 파싱 실패: {e}. 원본 내용 일부: {content[:200]}...")
+        # 응답이 잘렸을 가능성이 있는 경우에 대한 힌트 추가
+        if "unterminated string" in str(e).lower():
+            raise ValueError("AI 응답이 중간에 끊겼습니다 (Token Limit). 더 짧은 쿼리로 시도하거나 설정을 확인하세요.")
+        raise
 
 
 def convert_query(
@@ -104,125 +193,50 @@ def convert_query(
 ) -> dict:
     """
     LLM을 호출하여 단일 쿼리를 변환합니다.
-
-    Returns:
-        dict: converted_sql, conversion_log, difficulty_assessment, ai_guide_report
     """
+    # 현재 활성 모델 확인
+    active_model = _get_active_model()
+    logger.info(f"[LLM] Active Model: {active_model}")
+
     # Mock 모드
     if Config.LLM_MOCK_MODE:
         logger.info("[LLM] Mock 모드 — 테스트 응답 반환")
         return _MOCK_RESPONSE.copy()
 
-    if not Config.validate_ai_config():
-        logger.error("[LLM] AI 설정 누락 (AI_ENDPOINT, AI_API_KEY, AI_DEPLOY_MODEL)")
-        return {
-            "converted_sql": original_sql_xml,
-            "conversion_log": [],
-            "difficulty_assessment": {
-                "has_dynamic_tags": False,
-                "has_complex_functions": False,
-                "has_oracle_specific_syntax": True,
-                "unconverted_items": ["AI 설정 누락으로 변환 불가"],
-                "confidence": 0.0,
-            },
-            "ai_guide_report": "AI 설정이 누락되어 변환을 수행하지 못했습니다. .env 파일을 확인하세요.",
-        }
-
-    # Azure OpenAI API 호출
-    headers = {
-        "Content-Type": "application/json",
-        "api-key": Config.AI_API_KEY,
-    }
-
-    api_url = Config.AI_ENDPOINT
-    # OpenAI 표준 규격(/v1/) 또는 이미 완성된 URL인지 체크
-    if "/chat/completions" in api_url.lower():
-        pass
-    elif "/v1" in api_url.lower():
-        # OpenAI 표준 API 규격을 따르는 경우 (예: Azure API Gateway 등)
-        api_url = f"{api_url.rstrip('/')}/chat/completions"
-    elif "/deployments/" not in api_url and Config.AI_DEPLOY_MODEL:
-        # 일반적인 Azure OpenAI 직접 호출 엔드포인트인 경우
-        api_url = (
-            f"{api_url.rstrip('/')}/openai/deployments/"
-            f"{Config.AI_DEPLOY_MODEL}/chat/completions"
-            f"?api-version={Config.AI_API_VERSION}"
-        )
-
-    payload = {
-        "model": Config.AI_DEPLOY_MODEL,
-        "messages": [
-            {"role": "system", "content": _build_system_prompt()},
-            {
-                "role": "user",
-                "content": _build_user_prompt(original_sql_xml, schema_context, tag_name),
-            },
-        ],
-        # "temperature": 0,  # 최신 모델(O1/GPT-5 등)은 temperature를 지원하지 않거나 1만 허용함
-        "max_completion_tokens": Config.LLM_MAX_TOKENS,
-        "response_format": {"type": "json_object"},
-    }
+    system_p = _build_system_prompt()
+    user_p = _build_user_prompt(original_sql_xml, schema_context, tag_name)
 
     last_error = None
-    for attempt in range(1, Config.LLM_MAX_RETRIES + 2):  # 1 + retries
+    for attempt in range(1, Config.LLM_MAX_RETRIES + 2):
         try:
-            start = time.perf_counter()
-            resp = requests.post(
-                api_url,
-                headers=headers,
-                json=payload,
-                timeout=Config.LLM_TIMEOUT_SECONDS,
-            )
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            logger.info(
-                "[LLM] 시도 %d/%d — status=%d, %.0fms",
-                attempt, Config.LLM_MAX_RETRIES + 1, resp.status_code, elapsed_ms,
-            )
-
-            if resp.status_code == 200:
-                content = resp.json()["choices"][0]["message"]["content"]
-                parsed = json.loads(content)
-                
-                # 필수 키 검증
-                for key in ("converted_sql", "conversion_log", "difficulty_assessment", "ai_guide_report"):
-                    if key not in parsed:
-                        raise KeyError(f"LLM 응답에 '{key}' 키 누락")
-
-                # 가독성을 위해 XML 엔티티(&quot; 등)를 실제 문자로 복구 (특히 속성값 내 따옴표)
-                if parsed.get("converted_sql"):
-                    # &quot;와 &apos;를 홑따옴표(')로 변환하여 XML 속성 내 가독성 향상
-                    parsed["converted_sql"] = parsed["converted_sql"].replace("&quot;", "'").replace("&apos;", "'")
-                
-                return parsed
-
-            elif resp.status_code == 429:
-                # Rate limit — 대기 후 재시도
-                wait_sec = min(2 ** attempt, 30)
-                logger.warning("[LLM] Rate limited, %ds 대기 후 재시도", wait_sec)
-                time.sleep(wait_sec)
-                last_error = f"Rate limited (429)"
-                continue
+            if "claude" in active_model or "haiku" in active_model or "sonnet" in active_model or "opus" in active_model:
+                parsed = _call_claude(active_model, system_p, user_p)
             else:
-                last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
-                logger.error("[LLM] API 오류: %s", last_error)
+                # 기존 Azure OpenAI 호출 로직
+                parsed = _call_azure_openai(system_p, user_p)
+            
+            # 필수 키 검증 및 후처리
+            for key in ("converted_sql", "conversion_log", "difficulty_assessment", "ai_guide_report"):
+                if key not in parsed:
+                    raise KeyError(f"LLM 응답에 '{key}' 키 누락")
 
-        except json.JSONDecodeError as e:
-            last_error = f"JSON 파싱 실패: {str(e)}"
-            logger.error("[LLM] %s", last_error)
-        except requests.exceptions.Timeout:
-            last_error = "요청 타임아웃"
-            logger.error("[LLM] %s", last_error)
+            if parsed.get("converted_sql"):
+                parsed["converted_sql"] = parsed["converted_sql"].replace("&quot;", "'").replace("&apos;", "'")
+            
+            return parsed
+
+        except ValueError as ve:
+            # 영구적인 설정/잔액 오류는 재시도 없이 중단
+            last_error = str(ve)
+            logger.error(f"[LLM] 영구적 오류 발생 - 중단: {last_error}")
+            break
         except Exception as e:
             last_error = str(e)
-            logger.error("[LLM] 예외: %s", last_error)
-
-        # 재시도 대기 (exponential backoff)
-        if attempt <= Config.LLM_MAX_RETRIES:
-            wait_sec = 2 ** attempt
-            time.sleep(wait_sec)
+            logger.error(f"[LLM] 시도 {attempt} 실패: {last_error}")
+            if attempt <= Config.LLM_MAX_RETRIES:
+                time.sleep(2 ** attempt)
 
     # 모든 재시도 실패
-    logger.error("[LLM] 모든 재시도 실패: %s", last_error)
     return {
         "converted_sql": original_sql_xml,
         "conversion_log": [],
@@ -235,3 +249,49 @@ def convert_query(
         },
         "ai_guide_report": f"LLM 변환 실패 ({last_error}). 수동 변환이 필요합니다.",
     }
+
+
+def _call_azure_openai(system_prompt: str, user_prompt: str) -> dict:
+    """기존 Azure OpenAI 호출 로직 (추출됨)"""
+    if not Config.validate_ai_config():
+        raise ValueError("Azure AI 설정이 누락되었습니다.")
+
+    headers = {
+        "Content-Type": "application/json",
+        "api-key": Config.AI_API_KEY,
+    }
+
+    api_url = Config.AI_ENDPOINT
+    if "/chat/completions" in api_url.lower():
+        pass
+    elif "/v1" in api_url.lower():
+        api_url = f"{api_url.rstrip('/')}/chat/completions"
+    elif "/deployments/" not in api_url and Config.AI_DEPLOY_MODEL:
+        api_url = (
+            f"{api_url.rstrip('/')}/openai/deployments/"
+            f"{Config.AI_DEPLOY_MODEL}/chat/completions"
+            f"?api-version={Config.AI_API_VERSION}"
+        )
+
+    payload = {
+        "model": Config.AI_DEPLOY_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_completion_tokens": Config.LLM_MAX_TOKENS,
+        "response_format": {"type": "json_object"},
+    }
+
+    resp = requests.post(
+        api_url,
+        headers=headers,
+        json=payload,
+        timeout=Config.LLM_TIMEOUT_SECONDS,
+    )
+    
+    if resp.status_code != 200:
+        raise Exception(f"Azure API Error {resp.status_code}: {resp.text}")
+        
+    content = resp.json()["choices"][0]["message"]["content"]
+    return json.loads(content)

@@ -180,6 +180,21 @@
                 </div>
               </div>
             </div>
+            
+            <!-- 시스템 프롬프트 설정 -->
+            <div class="form-section">
+              <h4 class="section-label">AI 변환 지침 (System Prompt)</h4>
+              <div class="form-group">
+                <label class="form-label">프로젝트 전용 프롬프트 <span class="optional-label">(미입력 시 전역 기본값 사용)</span></label>
+                <textarea
+                  v-model="form.system_prompt"
+                  class="form-input prompt-textarea"
+                  placeholder="Oracle -> PostgreSQL 변환 시 이 프로젝트에만 적용할 특별 지침이 있다면 입력하세요."
+                  rows="6"
+                ></textarea>
+                <span class="form-hint">비워두면 전역 설정에 등록된 기본 프롬프트가 적용됩니다.</span>
+              </div>
+            </div>
 
             <!-- 메시지 -->
             <div v-if="message.text" :class="['message', message.type]">
@@ -301,7 +316,8 @@ export default {
           db_schema: '',
           user: '',
           pw: ''
-        }
+        },
+        system_prompt: ''
       }
     },
 
@@ -347,7 +363,8 @@ export default {
             db_schema: response.db_config.db_schema || '',
             user: response.db_config.user,
             pw: response.db_config.pw // 백엔드에서 준 마스킹 값 (********) 적용
-          }
+          },
+          system_prompt: response.system_prompt || ''
         }
         this.showForm = true
       } catch (error) {
@@ -362,7 +379,8 @@ export default {
       this.$emit('update-project', {
         project_id: this.form.project_id,
         project_name: this.form.project_name,
-        db_config: this.form.db_config
+        db_config: this.form.db_config,
+        system_prompt: this.form.system_prompt
       })
       this.message = { type: 'success', text: `'${this.form.project_name}' 프로젝트가 선택되었습니다.` }
     },
@@ -372,7 +390,8 @@ export default {
       this.$emit('update-project', {
         project_id: '',
         project_name: '프로젝트 미설정',
-        db_config: { host: '', port: 5432, db_name: '', user: '', pw: '' }
+        db_config: { host: '', port: 5432, db_name: '', user: '', pw: '' },
+        system_prompt: ''
       })
       this.message = { type: 'success', text: '프로젝트 선택이 해제되었습니다.' }
     },
@@ -436,7 +455,8 @@ export default {
           this.$emit('update-project', {
             project_id: '',
             project_name: '프로젝트 미설정',
-            db_config: { host: '', port: 5432, db_name: '', user: '', pw: '' }
+            db_config: { host: '', port: 5432, db_name: '', user: '', pw: '' },
+            system_prompt: ''
           })
         }
       } catch (error) {
@@ -797,6 +817,14 @@ export default {
 .message.error {
   background: #ffebee;
   color: #c62828;
+}
+
+.prompt-textarea {
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  background: #fdfdfd;
 }
 
 .form-actions {

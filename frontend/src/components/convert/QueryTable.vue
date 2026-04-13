@@ -6,6 +6,7 @@
           <th style="width: 80px;">난이도</th>
           <th>Query ID</th>
           <th style="width: 100px;">태그</th>
+          <th style="width: 100px;">확신도</th>
           <th style="width: 100px;">Dry Run</th>
           <th style="width: 80px;">상세</th>
         </tr>
@@ -18,6 +19,11 @@
           <td class="query-id">{{ query.query_id }}</td>
           <td>
             <span class="tag-badge">{{ query.tag_name }}</span>
+          </td>
+          <td>
+            <div :class="['confidence-cell', getConfidenceClass(query.confidence_score)]">
+              {{ formatConfidence(query.confidence_score) }}
+            </div>
           </td>
           <td>
             <DryRunResult :result="query.dry_run_result" compact />
@@ -49,7 +55,18 @@ export default {
       required: true
     }
   },
-  emits: ['select']
+  emits: ['select'],
+  methods: {
+    formatConfidence(score) {
+      if (score === undefined || score === null) return '-'
+      return Math.round(score * 100) + '%'
+    },
+    getConfidenceClass(score) {
+      if (score >= 0.9) return 'conf-high'
+      if (score >= 0.7) return 'conf-mid'
+      return 'conf-low'
+    }
+  }
 }
 </script>
 
@@ -113,5 +130,23 @@ export default {
 
 .btn-detail:hover {
   background: #5a6fd6;
+}
+
+.confidence-cell {
+  font-weight: 600;
+  font-size: 13px;
+  text-align: center;
+}
+
+.conf-high {
+  color: #2e7d32; /* Green */
+}
+
+.conf-mid {
+  color: #ed6c02; /* Orange */
+}
+
+.conf-low {
+  color: #d32f2f; /* Red */
 }
 </style>

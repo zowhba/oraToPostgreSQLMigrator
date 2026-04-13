@@ -43,11 +43,24 @@ _MOCK_RESPONSE = {
 
 
 def _build_system_prompt() -> str:
+    """DB에서 전역 기본 시스템 프롬프트를 가져옵니다."""
+    try:
+        conn = app_db.get_connection()
+        with conn.cursor() as cur:
+            cur.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'global_system_prompt'")
+            row = cur.fetchone()
+            if row: return row[0]
+    except Exception:
+        pass
+        
     return (
         "당신은 Oracle → PostgreSQL 마이그레이션 전문가입니다. "
         "MyBatis XML 쿼리를 PostgreSQL 호환으로 변환하세요. "
         "반드시 지정된 JSON 형식으로만 응답하며, JSON 외부에 어떠한 인사말이나 부연 설명도 하지 마십시오. "
-        "AI 분석 리포트는 변환 난이도에 따라 조정하십시오. 완벽한 자동 변환이 가능한 경우 핵심 주의사항만 짧게 작성하고, 수동 개입이 필요한 복잡한 경우에만 상세히 기술하십시오. "
+        "AI 분석 리포트는 다음 형식을 엄격히 준수하십시오: "
+        "1. 최상단에 '### 변환 확신도: XX%'를 반드시 기입하십시오. "
+        "2. 그 아래에 '#### 주요 변경 사항', '#### 주의사항', '#### 테스트 권장사항' 섹션을 순서대로 작성하십시오. "
+        "3. 난이도가 낮은 경우 요약하여 짧게 작성하고, 난이도가 높은 경우 상세히 기술하십시오. "
         "★ 중요: 절대로 쿼리 내용을 생략하거나 말줄임표(...)를 사용하지 마십시오. "
         "전체 SQL을 처음부터 끝까지 완전하게 작성하십시오."
     )
@@ -88,9 +101,11 @@ def _build_user_prompt(original_sql_xml: str, schema_context: str, tag_name: str
    - MONTHS_BETWEEN(d1, d2) → EXTRACT(YEAR FROM AGE(d1, d2)) * 12 + EXTRACT(MONTH FROM AGE(d1, d2))
    - ADD_MONTHS(d, n) → d + (n || ' months')::INTERVAL
 9. ★ 타입 캐스팅 및 NULL 비교 (매우 중요):
-   - PostgreSQL은 타입 비교에 매우 엄격합니다. 숫자(NUMBER)와 문자열(VARCHAR)을 비교할 경우 반드시 명시적 캐스팅을 추가하세요. (예: `col_int::text = '1'`, `col_text = 1::text`, `1::text IN (UPPER(...))` 등)
-   - `IN` 절 내의 리터럴과 컬럼 타입을 반드시 일치시키거나 캐스팅을 추가하세요.
-   - `col = NULL`은 항상 `col IS NULL`로 변환하고, `col != NULL`은 `col IS NOT NULL`로 변환하십시오.
+    - PostgreSQL은 타입 비교에 매우 엄격합니다. 숫자(NUMBER)와 문자열(VARCHAR)을 비교할 경우 반드시 명시적 캐스팅을 추가하세요. (예: `col_int::text = '1'`, `col_text = 1::text`, `1::text IN (UPPER(...))` 등)
+    - `IN` 절 내의 리터럴과 컬럼 타입을 반드시 일치시키거나 캐스팅을 추가하세요.
+    - `col = NULL`은 항상 `col IS NULL`로 변환하고, `col != NULL`은 `col IS NOT NULL`로 변환하십시오.
+10. ★ 기타 주의사항:
+   - 절대로 쿼리 내용을 생략하거나 말줄임표(...)를 사용하지 마십시오. 전체 SQL을 처음부터 끝까지 완전하게 작성하십시오.
 
 
 ## 응답 형식 (반드시 아래 JSON으로만):
@@ -106,7 +121,7 @@ def _build_user_prompt(original_sql_xml: str, schema_context: str, tag_name: str
     "unconverted_items": ["변환하지 못한 Oracle 전용 요소 목록 (없으면 빈 배열)"],
     "confidence": 0.0에서 1.0 사이의 변환 확신도
   }},
-  "ai_guide_report": "리포트 작성 가이드: 1) 단순 자동 변환(확신도 0.9 이상)인 경우: '주의사항/테스트 권장사항/변환확신도'만 3~5줄로 요약. 2) 복잡하거나 수동 개입 필요시: 변환 근거 및 변경 사항을 포함한 상세 Markdown 리포트 작성."
+  "ai_guide_report": "리포트 작성 가이드 (Markdown 형식): 반드시 최상단에 '### 변환 확신도: XX%'를 명시하십시오. 그 후 다음 순서로 작성하십시오: 1) 주요 변경 사항, 2) 주의사항, 3) 테스트 권장사항. 난이도가 낮은 경우 각 항목을 1~2줄로 요약하고, 높은 경우 상세히 서술하십시오."
 }}
 """
 
@@ -122,7 +137,7 @@ def _call_claude(model: str, system_prompt: str, user_prompt: str) -> dict:
         "content-type": "application/json",
     }
     
-    # 모델명 매핑 (2026년 최신 Claude 4.x 모델 지원)
+    # 모델명 매핑 (2026년 최신 Claude 4.5/4.6 모델 지원)
     model_id = {
         "haiku-4.5": "claude-haiku-4-5",
         "sonnet-4.5": "claude-sonnet-4-5",
@@ -190,6 +205,7 @@ def convert_query(
     original_sql_xml: str,
     schema_context: str,
     tag_name: str,
+    system_prompt: Optional[str] = None
 ) -> dict:
     """
     LLM을 호출하여 단일 쿼리를 변환합니다.
@@ -203,7 +219,7 @@ def convert_query(
         logger.info("[LLM] Mock 모드 — 테스트 응답 반환")
         return _MOCK_RESPONSE.copy()
 
-    system_p = _build_system_prompt()
+    system_p = system_prompt or _build_system_prompt()
     user_p = _build_user_prompt(original_sql_xml, schema_context, tag_name)
 
     last_error = None

@@ -92,6 +92,13 @@ def stream_conversion(request: ConvertRequest):
     
     logger.info("[Convert] 시작 — project=%s, file=%s, queries=%d", request.project_id, request.xml_file_name, total_queries)
 
+    # 효과적인 시스템 프롬프트 결정
+    effective_system_prompt = request.system_prompt_override
+    if not effective_system_prompt:
+        project = project_service.get_project(request.project_id)
+        if project and project.get("system_prompt"):
+            effective_system_prompt = project["system_prompt"]
+
     yield {
         "type": "progress",
         "current": 0.1,
@@ -137,12 +144,14 @@ def stream_conversion(request: ConvertRequest):
                 original_sql_xml=query.original_sql_xml,
                 schema_context=schema_context,
                 tag_name=query.tag_name,
+                system_prompt=effective_system_prompt
             )
 
             converted_sql = llm_response.get("converted_sql", query.original_sql_xml)
             conversion_log_raw = llm_response.get("conversion_log", [])
             difficulty_assessment = llm_response.get("difficulty_assessment", {})
             ai_guide_report = llm_response.get("ai_guide_report", "")
+            confidence_score = difficulty_assessment.get("confidence", 0.0)
 
             conversion_log = [
                 ConversionLogEntry(
@@ -184,6 +193,7 @@ def stream_conversion(request: ConvertRequest):
                 conversion_log=conversion_log,
                 dry_run_result=dry_run_result,
                 ai_guide_report=ai_guide_report,
+                confidence_score=confidence_score,
             )
 
         except Exception as e:
@@ -201,6 +211,7 @@ def stream_conversion(request: ConvertRequest):
                     error_message=f"변환 처리 중 오류: {str(e)}",
                 ),
                 ai_guide_report=f"변환 중 시스템 오류가 발생했습니다: {str(e)}",
+                confidence_score=0.0,
             )
 
         results.append(result)

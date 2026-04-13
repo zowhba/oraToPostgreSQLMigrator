@@ -5,6 +5,9 @@
       <span class="version">v1.0</span>
     </div>
     <div class="header-right">
+      <span class="model-badge" v-if="activeModelName">
+        모델: {{ activeModelName }}
+      </span>
       <span class="project-badge" v-if="projectName">
         프로젝트: {{ projectName }}
       </span>
@@ -17,6 +20,10 @@ export default {
   name: 'AppHeader',
   props: {
     projectName: {
+      type: String,
+      default: ''
+    },
+    activeModelName: {
       type: String,
       default: ''
     }
@@ -68,5 +75,21 @@ export default {
   padding: 6px 12px;
   border-radius: 6px;
   font-size: 14px;
+}
+
+.header-right {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.model-badge {
+  background: #ffecb3;
+  color: #5d4037;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 </style>

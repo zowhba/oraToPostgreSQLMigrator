@@ -106,7 +106,8 @@ async def get_history_detail(conversion_id: int):
                 "converted_sql": q["converted_sql"],
                 "conversion_log": json.loads(q["conversion_log"]) if isinstance(q["conversion_log"], str) else q["conversion_log"],
                 "dry_run_result": json.loads(q["dry_run_result"]) if isinstance(q["dry_run_result"], str) else q["dry_run_result"],
-                "ai_guide_report": q["ai_guide_report"]
+                "ai_guide_report": q["ai_guide_report"],
+                "confidence_score": q.get("confidence_score", 0.0)
             })
 
         return {

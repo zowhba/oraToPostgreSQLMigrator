@@ -20,6 +20,7 @@ class ProjectCreateRequest(BaseModel):
     project_id: str = Field(..., description="프로젝트 고유 ID", examples=["PRJ_SKB_001"])
     project_name: str = Field(..., description="프로젝트 명칭", examples=["SKB 차세대 마이그레이션"])
     db_config: DBConfig
+    system_prompt: Optional[str] = Field(None, description="프로젝트별 커스텀 시스템 프롬프트")
 
 
 class ProjectCreateResponse(BaseModel):
@@ -36,6 +37,7 @@ class ProjectInfo(BaseModel):
     db_config_summary: str = Field(
         ..., description="호스트:포트/DB명 형식 (비밀번호 미포함)"
     )
+    system_prompt: Optional[str] = None
 
 
 class ProjectListResponse(BaseModel):

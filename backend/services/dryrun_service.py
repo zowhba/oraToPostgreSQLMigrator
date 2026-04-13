@@ -42,6 +42,38 @@ def _restore_sql_operators(text: str, restore_map: dict) -> str:
     return text
 
 
+def _sanitize_sql_for_dryrun(sql: str) -> str:
+    """
+    Dry-run 실행 전 SQL을 정제합니다.
+    1. 수학 기호 (≠ 등) -> SQL 연산자 (!=) 변환
+    2. '= NULL' -> 'IS NULL' (LLM 실수 보정)
+    3. 'ORDER BY ... 1 1' 과 같은 파라미터 치환 찌꺼기 정리
+    """
+    # 1. 수학 기호 변환
+    sql = sql.replace('≠', '!=')
+    sql = sql.replace('≤', '<=')
+    sql = sql.replace('≥', '>=')
+
+    # 2. '= NULL' -> 'IS NULL' (NULL 비교는 반드시 IS 가 필요함)
+    # 조심: UPDATE SET 절의 '= NULL'은 대입문이므로 IS NULL로 바꾸면 안 됨.
+    # WHERE, AND, OR, ON 뒤의 비교 연산만 대상으로 함.
+    sql = re.sub(r'(\bWHERE\b|\bAND\b|\bOR\b|\bON\b)\s+([\w\.\(\)]+)\s*=\s*NULL\b', r'\1 \2 IS NULL', sql, flags=re.IGNORECASE)
+    sql = re.sub(r'(\bWHERE\b|\bAND\b|\bOR\b|\bON\b)\s+([\w\.\(\)]+)\s*(!=|<>)\s*NULL\b', r'\1 \2 IS NOT NULL', sql, flags=re.IGNORECASE)
+
+    # 3. ORDER BY 찌꺼기 정리
+    sql = re.sub(r'(\bORDER\s+BY\s+[\w\.]+)\s+1\s+1\b', r'\1', sql, flags=re.IGNORECASE)
+    
+    # 4. 타입 캐스팅 보정 (1 IN (UPPER(...)) 패턴)
+    # '1 IN (' -> '1::text IN (' (가장 흔한 에러 케이스)
+    sql = re.sub(r'\b1\s+IN\s+\(\s*UPPER\b', '1::text IN (UPPER', sql, flags=re.IGNORECASE)
+
+    # 5. IN ( NULL ) 은 괜찮지만 IN ( ) 는 에러이므로 방어
+    sql = sql.replace('IN ( )', 'IN ( NULL )')
+    sql = sql.replace('IN ()', 'IN ( NULL )')
+
+    return sql
+
+
 def _process_choose(text: str) -> str:
     """
     <choose>...</choose> 블록에서 첫 번째 <when> 브랜치의 내용만 추출합니다.
@@ -214,6 +246,9 @@ def _strip_mybatis_tags(sql_xml: str) -> str:
     # 8. WHERE 바로 뒤 AND/OR 제거 (MyBatis <where> 동작 모방)
     text = re.sub(r"\bWHERE\s+(AND|OR)\s+", "WHERE ", text, flags=re.IGNORECASE)
 
+    # 9. 최종 기호 및 문법 정제 (≠ 등)
+    text = _sanitize_sql_for_dryrun(text)
+
     return text
 
 
@@ -226,8 +261,14 @@ def _substitute_mybatis_params(sql: str) -> str:
     """
     # #{...} → NULL
     sql = re.sub(r"#\{[^}]*\}", "NULL", sql)
+    
     # ${...} → 1 (문자열)
+    # 단, ORDER BY 뒤에 오는 경우 정렬 방향으로 오해받아 에러날 수 있으므로
+    # 'ORDER BY ... 1' 형태가 되면 1을 제거하거나 ASC로 처리 (sanitize에서 이미 일부 처리)
     sql = re.sub(r"\$\{[^}]*\}", "1", sql)
+    
+    # 치환 후 다시 한번 sanitize 실행 (중복 공백이나 찌꺼기 제거)
+    sql = _sanitize_sql_for_dryrun(sql)
     return sql
 
 

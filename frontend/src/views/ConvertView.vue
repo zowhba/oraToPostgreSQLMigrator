@@ -17,6 +17,27 @@
       />
     </div>
 
+    <!-- 변환 설정 (프롬프트 편집) -->
+    <div class="section-card prompt-override-section" v-if="queries.length > 0 && results.length === 0 && !loading">
+      <div class="section-header" @click="showPromptEditor = !showPromptEditor">
+        <h3 class="section-title">
+          <span class="icon">⚙️</span> 변환 프롬프트 설정 
+          <span class="optional-label">(프로젝트 설정을 기반으로 하며, 이번 1회 변환에만 적용됩니다)</span>
+        </h3>
+        <span class="toggle-icon">{{ showPromptEditor ? '▲' : '▼' }}</span>
+      </div>
+      
+      <div v-if="showPromptEditor" class="prompt-editor-body">
+        <textarea 
+          v-model="oneTimePrompt" 
+          class="form-input prompt-textarea" 
+          placeholder="이 프로젝트의 기본 지침을 기반으로 이번 변환에만 적용할 내용을 수정하세요. 비워두면 프로젝트 설정값이 사용됩니다."
+          rows="5"
+        ></textarea>
+        <p class="hint-text">입력한 내용은 저장되지 않으며 이번 변환 세션에만 적용됩니다.</p>
+      </div>
+    </div>
+
     <!-- 변환 버튼 및 상태 -->
     <div class="action-bar" v-if="queries.length > 0">
       <span class="query-count">{{ queries.length }}개 쿼리 발견</span>
@@ -25,7 +46,7 @@
           class="btn btn-primary"
           @click="handleConvert"
         >
-          변환하기
+          변환 시작하기
         </button>
       </div>
     </div>
@@ -90,7 +111,7 @@
 import FileUpload from '../components/convert/FileUpload.vue'
 import QueryTable from '../components/convert/QueryTable.vue'
 import QueryDetail from '../components/convert/QueryDetail.vue'
-import { convertQueriesStream, getHistoryDetail } from '../api/index.js'
+import { convertQueriesStream, getHistoryDetail, getSettings } from '../api/index.js'
 import * as XLSX from 'xlsx'
 
 export default {
@@ -117,10 +138,14 @@ export default {
       progress: 0,
       statusMessage: '',
       estimatedTime: 0,
-      usedModel: ''
+      usedModel: '',
+      showPromptEditor: false,
+      oneTimePrompt: '',
+      globalPrompt: ''
     }
   },
   mounted() {
+    this.fetchGlobalPrompt()
     this.checkHistoryParam()
   },
   methods: {
@@ -145,6 +170,17 @@ export default {
       }
     },
 
+    async fetchGlobalPrompt() {
+      try {
+        const settings = await getSettings()
+        if (settings && settings.global_system_prompt) {
+          this.globalPrompt = settings.global_system_prompt
+        }
+      } catch (error) {
+        console.error('Failed to fetch global prompt:', error)
+      }
+    },
+
     loadFromHistory(data) {
       this.fileName = data.xml_file_name
       this.namespace = data.project_id // namespace 대신 project_id로 저장되어 있으므로 적절히 대응
@@ -164,6 +200,8 @@ export default {
       this.queries = queries
       this.results = []
       this.selectedQuery = null
+      // 프로젝트 프롬프트가 있으면 우선 사용, 없으면 전역 공통 프롬프트로 초기화
+      this.oneTimePrompt = this.project.system_prompt || this.globalPrompt || ''
     },
 
     async handleConvert() {
@@ -182,7 +220,8 @@ export default {
           xml_file_name: this.fileName,
           mapper_namespace: this.namespace,
           file_created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
-          queries: this.queries
+          queries: this.queries,
+          system_prompt_override: this.oneTimePrompt
         }
 
         // 스트리밍 호출
@@ -564,5 +603,52 @@ export default {
 
 .model-info-badge strong {
   color: #4f46e5;
+}
+
+/* ─── 프롬프트 오버라이드 UI ─── */
+.prompt-override-section {
+  padding: 16px 24px !important;
+}
+
+.prompt-override-section .section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.prompt-override-section .section-title {
+  margin-bottom: 0;
+  font-size: 15px;
+}
+
+.optional-label {
+  font-size: 12px;
+  color: #888;
+  font-weight: 400;
+  margin-left: 8px;
+}
+
+.prompt-editor-body {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.prompt-textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-family: 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  background: #fdfdfd;
+}
+
+.hint-text {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 8px;
 }
 </style>

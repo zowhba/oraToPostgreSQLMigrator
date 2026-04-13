@@ -29,6 +29,16 @@
           </div>
         </div>
       </div>
+      <div class="form-group prompt-section">
+        <label>전역 기본 시스템 프롬프트</label>
+        <p class="field-desc">새 프로젝트 생성 시 기본으로 사용되는 AI 지침입니다.</p>
+        <textarea 
+          v-model="globalSystemPrompt" 
+          placeholder="AI에게 전달할 기본 지침을 입력하세요..."
+          rows="10"
+          class="prompt-textarea"
+        ></textarea>
+      </div>
 
       <div class="actions">
         <button class="save-btn" @click="saveSettings" :disabled="loading">
@@ -46,7 +56,8 @@ export default {
   name: 'GlobalSettingsView',
   data() {
     return {
-      activeModel: 'gpt-5.2-chat',
+      activeModel: 'haiku-4.5',
+      globalSystemPrompt: '',
       loading: false,
       models: [
         { id: 'gpt-5.2-chat', name: 'Azure ChatGPT 5.2', desc: '기본 모델 (빠르고 안정적)' },
@@ -57,14 +68,19 @@ export default {
     }
   },
   methods: {
-    async fetchActiveModel() {
+    async fetchSettings() {
       try {
-        const response = await axios.get('http://localhost:8000/api/settings/active-model')
-        if (response.data && response.data.active_model) {
-          this.activeModel = response.data.active_model
+        const response = await axios.get('/api/settings')
+        if (response.data) {
+          if (response.data.active_model) {
+            this.activeModel = response.data.active_model
+          }
+          if (response.data.global_system_prompt) {
+            this.globalSystemPrompt = response.data.global_system_prompt
+          }
         }
       } catch (error) {
-        console.error('Failed to fetch active model:', error)
+        console.error('Failed to fetch settings:', error)
       }
     },
     selectModel(modelId) {
@@ -73,11 +89,13 @@ export default {
     async saveSettings() {
       this.loading = true
       try {
-        await axios.post('http://localhost:8000/api/settings', {
-          key: 'active_model',
-          value: this.activeModel
-        })
-        alert('설정이 저장되었습니다.')
+        // 병렬 저장
+        await Promise.all([
+          axios.post('/api/settings', { key: 'active_model', value: this.activeModel }),
+          axios.post('/api/settings', { key: 'global_system_prompt', value: this.globalSystemPrompt })
+        ])
+        this.$emit('update-model')
+        alert('모든 설정이 저장되었습니다.')
       } catch (error) {
         console.error('Failed to save settings:', error)
         alert('설정 저장에 실패했습니다.')
@@ -87,7 +105,7 @@ export default {
     }
   },
   mounted() {
-    this.fetchActiveModel()
+    this.fetchSettings()
   }
 }
 </script>
@@ -217,5 +235,29 @@ export default {
   background: #ccc;
   cursor: not-allowed;
   transform: none;
+}
+
+.field-desc {
+  font-size: 13px;
+  color: #888;
+  margin-bottom: 10px;
+}
+
+.prompt-textarea {
+  width: 100%;
+  padding: 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+  background: #fafafa;
+}
+
+.prompt-textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  background: #fff;
 }
 </style>

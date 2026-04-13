@@ -57,8 +57,8 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
                 INSERT INTO query_conversions (
                     conversion_id, query_id, tag_name, difficulty_level,
                     original_sql_xml, converted_sql, conversion_log,
-                    dry_run_success, dry_run_result, ai_guide_report
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    dry_run_success, dry_run_result, ai_guide_report, confidence_score
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     conversion_id,
@@ -70,7 +70,8 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
                     log_json,
                     res.dry_run_result.is_success,
                     dry_run_json,
-                    res.ai_guide_report
+                    res.ai_guide_report,
+                    res.confidence_score
                 )
             )
 

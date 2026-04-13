@@ -39,6 +39,7 @@ class ConvertRequest(BaseModel):
         ..., description="요청 생성 일시 (YYYY-MM-DD HH:mm:ss)"
     )
     queries: list[QueryUnit]
+    system_prompt_override: Optional[str] = Field(None, description="해당 세션에만 적용할 1회성 시스템 프롬프트")
 
 
 # ────────────────────────────────────────────
@@ -74,6 +75,7 @@ class QueryResult(BaseModel):
     conversion_log: list[ConversionLogEntry] = Field(default_factory=list)
     dry_run_result: DryRunResult
     ai_guide_report: str = Field("", description="전문가용 심층 리포트")
+    confidence_score: float = Field(0.0, description="AI 변환 확신도 (0.0 ~ 1.0)")
 
 
 class ConvertResponse(BaseModel):

@@ -50,6 +50,7 @@ def create_project(req: ProjectCreateRequest) -> ProjectCreateResponse:
             UPDATE projects
             SET project_name = %s, db_host = %s, db_port = %s,
                 db_name = %s, db_schema = %s, db_user = %s, db_pw = %s,
+                system_prompt = %s,
                 updated_at = CURRENT_TIMESTAMP
             WHERE project_id = %s
             """,
@@ -61,6 +62,7 @@ def create_project(req: ProjectCreateRequest) -> ProjectCreateResponse:
                 req.db_config.db_schema or None,
                 req.db_config.user,
                 req.db_config.pw,
+                req.system_prompt,
                 req.project_id,
             ),
         )
@@ -75,8 +77,8 @@ def create_project(req: ProjectCreateRequest) -> ProjectCreateResponse:
     # 신규 프로젝트 생성
     cur.execute(
         """
-        INSERT INTO projects (project_id, project_name, db_host, db_port, db_name, db_schema, db_user, db_pw)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO projects (project_id, project_name, db_host, db_port, db_name, db_schema, db_user, db_pw, system_prompt)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             req.project_id,
@@ -87,6 +89,7 @@ def create_project(req: ProjectCreateRequest) -> ProjectCreateResponse:
             req.db_config.db_schema or None,
             req.db_config.user,
             req.db_config.pw,
+            req.system_prompt,
         ),
     )
     cur.close()
@@ -112,6 +115,7 @@ def get_project(project_id: str) -> Optional[dict]:
     return {
         "project_id": row["project_id"],
         "project_name": row["project_name"],
+        "system_prompt": row["system_prompt"],
         "db_config": DBConfig(
             host=row["db_host"],
             port=row["db_port"],
@@ -126,7 +130,7 @@ def get_project(project_id: str) -> Optional[dict]:
 def list_projects() -> ProjectListResponse:
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT project_id, project_name, db_host, db_port, db_name, db_user FROM projects ORDER BY created_at")
+    cur.execute("SELECT project_id, project_name, db_host, db_port, db_name, db_user, system_prompt FROM projects ORDER BY created_at")
     rows = cur.fetchall()
     cur.close()
 
@@ -135,6 +139,7 @@ def list_projects() -> ProjectListResponse:
             project_id=row["project_id"],
             project_name=row["project_name"],
             db_config_summary=f"{row['db_host']}:{row['db_port']}/{row['db_name']} (user={row['db_user']})",
+            system_prompt=row["system_prompt"],
         )
         for row in rows
     ]

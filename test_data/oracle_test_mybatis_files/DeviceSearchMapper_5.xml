@@ -1,0 +1,674 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.skb.edmp.admin.store.device.DeviceSearchMapper">
+
+    <sql id="PREFIX">
+    SELECT
+        P.*
+        FROM (
+              SELECT
+                  ROWNUM AS RNUM
+                , PAGING.*
+                  FROM (
+    </sql>
+    <sql id="MIDDELFIX">
+        ) PAGING
+        WHERE ROWNUM &lt;=
+    </sql>
+    <sql id="ENDFIX">
+        ) P
+        WHERE RNUM &gt;
+    </sql>
+
+    <select id="selectListDeviceMst" parameterType="com.skb.edmp.admin.dto.device.DeviceDTO" resultType="com.skb.edmp.admin.dto.device.DeviceDTO">
+
+        <include refid="PREFIX" />
+           SELECT /*+ leading(PS) */
+             DDM.STB_ID
+            ,DECODE(LENGTH(STB.USER_SERVICE_NUM),10,'상용','테스트용' ) STBDIVISION
+            ,PS.MAC_ADDRESS
+            ,(SELECT SM.MODEL_NAME
+                FROM STB_MODEL SM
+               WHERE SM.MODEL_CODE = PS.MODEL_CODE
+                 ) MODEL_NAME
+            ,(SELECT MCM.CUG_NM
+                FROM DM_CUG_MST DCM ,MN_CUG_MST MCM
+               WHERE To_char(stb.service_code) = DCM.CUG_ID
+                 AND DCM.CUG_ID = MCM.CUG_ID
+                 AND ROWNUM = 1) CUG_EXPL
+            ,(SELECT COMM.CD_NM
+                FROM AD_COMM_CD COMM
+               WHERE COMM.COMM_GRP_CD = 'IPTV_STATUS_CODE'
+                 AND COMM.COMM_CD = STB.IPTV_STATUS_CODE
+                 ) CD_NM
+            ,DDM.CLNT_IPADDR
+            ,DDM.RCU_MANUFR_CD
+            ,DDM.RCU_FIRM_VER
+            ,DDM.CLNT_PUB_IPADDR
+            ,DDM.STB_SW_VER STB_SW_PLAN_INST_VER
+            ,DDM.STB_SW_PLAN_LAST_VER
+            ,DDM.PLAN_ID
+            ,UUPM.PLAN_NM
+            ,TO_CHAR(DDM.STB_LAST_CONN_DATE, 'YYYY.MM.DD HH24:MI') STB_LAST_CONN_DATE
+            ,TO_CHAR(DDM.STM_UPTM, 'YYYY.MM.DD HH24:MI') STM_UPTM
+            ,DECODE(DDM.STM_UPTM,NULL,'',TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM)||'일') AS OVERUPTIME
+            ,'N' AS MYSTBYN
+            ,(SELECT DQTM.TEAM_NM
+                FROM DM_QLTY_TEAM_MST DQTM
+               WHERE DDM.TEAM_CD = DQTM.TEAM_CD
+                 AND ROWNUM = 1) AREAQLTY
+            ,STB.USER_SERVICE_NUM
+            ,DECODE(DDM.HDMI_POW,'1','사용함','0','사용 안함',NULL) HDMI_POW
+            ,DECODE(DDM.RCU_PAIRING,'1','Y','0','N',NULL) RCU_PAIRING
+            ,DDM.TEAM_CD
+                                                            <!-- ADDED -->
+            ,TO_CHAR(DDM.STB_SW_UPD_DATE,'YYYY.MM.DD HH24:MI') STB_SW_UPD_DATE
+            ,DDM.LOCK_YN
+            ,DDM.UPD_YN
+            ,DDM.native_ui_ver
+            ,DDM.web_ui_ver
+            ,SD.SCRBR_TYP_CD
+            ,SD.TBR_SO_CL_CD
+            ,(SELECT
+				COMM.CD_NM
+			FROM
+				AD_COMM_CD COMM
+			WHERE
+				COMM.COMM_GRP_CD = 'SCRBR_TYP_CD'
+				AND COMM.COMM_CD = SD.SCRBR_TYP_CD ) SCRBR_TYP_NM
+            ,DADM.ACC_SW_VER
+            ,DADM.ACC_MODL_NM
+            ,DDM.EXE_SCH_ID
+            ,UPPESL.EXE_SCH_NM
+            ,(SELECT COMM.CD_NM FROM AD_COMM_CD COMM
+                WHERE COMM.COMM_GRP_CD = 'UPD_STS_FG_CD'
+                AND COMM.COMM_CD = UPPESL.UPD_STS_FG_CD AND ROWNUM = 1) UPD_STS_FG_CD_NM
+        FROM
+             STB STB
+            ,DM_DVC_MST DDM
+            ,PHYSICAL_STB PS
+            ,UM_UPD_PLAN_MST UUPM
+            ,STB_DTL SD
+            ,DM_ACC_DVC_MST DADM
+            ,UM_UPD_PLAN_EXE_SCH_LST UPPESL
+                                                <!--             ,DM_DVC_PRVN_MST DDPM -->
+        <if test="!deviceGroup.equals('')">
+            ,DM_DVC_GRP_MST GM
+            ,DM_DVC_GRP_PSNL_MAP GPM
+        </if>
+          WHERE 1=1
+            AND DDM.STB_ID = STB.STB_ID
+            AND DDM.STB_ID = PS.STB_ID (+)
+            AND DDM.PLAN_ID = UUPM.PLAN_ID (+)
+            AND DDM.STB_ID = SD.STB_ID (+)
+            AND DDM.STB_ID = DADM.STB_ID (+)
+            AND DDM.EXE_SCH_ID = UPPESL.EXE_SCH_ID (+)
+                                                <!--             AND DDM.STB_ID = DDPM.STB_ID (+) -->
+        <if test="!deviceGroup.equals('')">
+            AND GM.DVC_GRP_ID = GPM.DVC_GRP_ID(+)
+            AND DDM.STB_ID = GPM.STB_ID
+            AND GM.DVC_GRP_FG_CD = '02'
+            AND UPPER(GM.DVC_GRP_NM) LIKE UPPER('%' || #{deviceGroup} || '%')
+        </if>
+        <if test="searchUpdYn != null and !searchUpdYn.equals('')">
+            AND DDM.UPD_YN = #{searchUpdYn}
+        </if>
+        <choose>
+            <when test="!macAddress.equals('')">
+            AND PS.MAC_ADDRESS = LOWER(#{macAddress})
+            </when>
+            <when test="!otherTxt.equals('')">
+            AND ${otherCondition} = #{otherTxt}
+            </when>
+            <when test="!stbId.equals('')">
+           AND STB.STB_ID = UPPER(#{stbId})
+            </when>
+            <otherwise>
+                <choose>
+                    <when test='vcheck.equals("3")'>
+                        <if test="!toVersion.equals('') and !fromVersion.equals('')">
+                AND ${versionCondition} BETWEEN #{toVersion} AND #{fromVersion}
+                        </if>
+                    </when>
+                    <when test='vcheck.equals("4")'>
+                        <if test="!toVersion.equals('')">
+                AND ${versionCondition} = #{toVersion}
+                        </if>
+                    </when>
+                    <when test='vcheck.equals("1")'>
+                        <if test="!toVersion.equals('')">
+                AND ${versionCondition} <![CDATA[>=]]> #{toVersion}
+                        </if>
+                    </when>
+                    <when test='vcheck.equals("2")'>
+                        <if test="!toVersion.equals('')">
+                AND ${versionCondition} <![CDATA[<=]]> #{toVersion}
+                        </if>
+                    </when>
+                </choose>
+                <if test="areaQltyList.size != 0 and !areaQltyList.equals('')">
+                AND DDM.TEAM_CD IN
+                    <foreach collection="areaQltyList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="modelNameList.size != 0 and !modelNameList.equals('')">
+                AND PS.MODEL_CODE IN
+                    <foreach collection="modelNameList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="divisionList.size != 0 and !divisionList.equals('')">
+                AND TRIM(STB.SERVICE_CODE) IN
+                    <foreach collection="divisionList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="networkList.size != 0 and !networkList.equals('')">
+                AND STB.NETWORK_BRAND_CODE IN
+                    <foreach collection="networkList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="openingStateList.size != 0 and !openingStateList.equals('')">
+                AND STB.IPTV_STATUS_CODE IN
+                    <foreach collection="openingStateList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="joinProductList.size != 0 and !joinProductList.equals('')">
+                AND STB.ID_PACKAGE IN
+                    <foreach collection="joinProductList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="scrbrTypCdList != null and scrbrTypCdList.size != 0 and !scrbrTypCdList.equals('')">
+                    AND SD.SCRBR_TYP_CD IN
+                    <foreach collection="scrbrTypCdList" item="type" index="index" open="(" close=")" separator=",">
+                        #{type}
+                    </foreach>
+                </if>
+
+                <choose>
+                    <when test='uptime.equals("1")'>
+                        <if test="!fromUptm.equals('') and !toUptm.equals('')">
+                            <choose>
+                                <when test='check.equals("3")'>
+                    AND DDM.STM_UPTM BETWEEN TO_DATE(#{fromUptm}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                          AND TO_DATE(#{toUptm}||'23:59:59','yyyyMMdd HH24:MI:SS')
+                                </when>
+                                <when test="!fromUptm.equals('')">
+                                    <if test='check.equals("4")'>
+                    AND DDM.STM_UPTM BETWEEN TO_DATE(#{fromUptm}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                          AND TO_DATE(#{fromUptm}||'23:59:59','yyyyMMdd HH24:MI:SS')
+                                    </if>
+                                    <if test='check.equals("1")'>
+                    AND DDM.STM_UPTM <![CDATA[>=]]> TO_DATE(#{fromUptm})
+                                    </if>
+                                    <if test='check.equals("2")'>
+                    AND DDM.STM_UPTM <![CDATA[<=]]> TO_DATE(#{fromUptm})+0.99999
+                                    </if>
+                                </when>
+                            </choose>
+                        </if>
+                    </when>
+                    <when test='uptime.equals("2")'>
+                        <choose>
+                            <when test='check.equals("3")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) BETWEEN #{overTimeFrom} and #{overTimeTo} -->
+                    AND DDM.STM_UPTM BETWEEN TRUNC(SYSDATE-#{overTimeTo}) AND TRUNC(SYSDATE-#{overTimeFrom})+0.99999
+                            </when>
+                            <when test="!overTime.equals('')">
+                                <if test='check.equals("4")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) = #{overTime} -->
+                    AND DDM.STM_UPTM BETWEEN TRUNC(SYSDATE-#{overTime}) AND TRUNC(SYSDATE-#{overTime})+0.99999
+                                </if>
+                                <if test='check.equals("1")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) <![CDATA[>]]> #{overTime} -->
+                    AND DDM.STM_UPTM <![CDATA[<=]]> TRUNC(SYSDATE-#{overTime})+0.99999
+                                </if>
+                                <if test='check.equals("2")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) <![CDATA[<]]> #{overTime} -->
+                    AND DDM.STM_UPTM <![CDATA[>=]]> TRUNC(SYSDATE-#{overTime})
+                                </if>
+                            </when>
+                        </choose>
+                    </when>
+                </choose>
+
+                <if test='stbDivision.equals("02")'>
+                AND LENGTH(STB.USER_SERVICE_NUM) = 10
+                </if>
+                <if test='stbDivision.equals("03")'>
+                AND LENGTH(STB.USER_SERVICE_NUM) != 10
+                </if>
+
+            </otherwise>
+        </choose>
+        <if test='accModlId != null and !accModlId.equals("")'>
+                AND DDM.STB_ID IN (SELECT STB_ID FROM dm_acc_dvc_mst WHERE acc_modl_id = #{accModlId}
+            <if test='accSwVer != null and !accSwVer.equals("")'>
+                    AND acc_sw_ver = #{accSwVer}
+            </if>
+                )
+        </if>
+
+            
+     ORDER BY DDM.STB_ID
+
+        <include refid="MIDDELFIX" />
+      ${endRow}
+        <include refid="ENDFIX" />
+      ${startRow}
+    </select>
+
+    <select id="selectOneTotCntDeviceMst" parameterType="com.skb.edmp.admin.dto.device.DeviceDTO" resultType="com.skb.edmp.admin.dto.device.DeviceDTO">
+
+      SELECT /*+ leading(PS) */
+             COUNT(1) TOTAL
+        FROM
+             STB STB
+            ,DM_DVC_MST DDM
+            ,PHYSICAL_STB PS
+            ,STB_DTL SD
+            ,DM_ACC_DVC_MST DADM
+                                                <!--             ,DM_DVC_PRVN_MST DDPM -->
+        <if test="!deviceGroup.equals('')">
+            ,DM_DVC_GRP_MST GM
+            ,DM_DVC_GRP_PSNL_MAP GPM
+        </if>
+          WHERE 1=1
+            AND DDM.STB_ID = STB.STB_ID
+            AND DDM.STB_ID = PS.STB_ID (+)
+            AND DDM.STB_ID = SD.STB_ID (+)
+            AND DDM.STB_ID = DADM.STB_ID (+)
+                                                <!--             AND DDM.STB_ID = DDPM.STB_ID (+) -->
+        <if test="!deviceGroup.equals('')">
+            AND GM.DVC_GRP_ID = GPM.DVC_GRP_ID(+)
+            AND DDM.STB_ID = GPM.STB_ID
+            AND GM.DVC_GRP_FG_CD = '02'
+            AND UPPER(GM.DVC_GRP_NM) LIKE UPPER('%' || #{deviceGroup} || '%')
+        </if>
+        <if test="searchUpdYn != null and !searchUpdYn.equals('')">
+            AND DDM.UPD_YN = #{searchUpdYn}
+        </if>
+        <choose>
+            <!-- <when test="!macAddress.equals('')">
+            AND UPPER(PS.MAC_ADDRESS) = UPPER(#{macAddress})
+        </when> -->
+            <when test="!macAddress.equals('')">
+            AND PS.MAC_ADDRESS = LOWER(#{macAddress})
+            </when>
+            <when test="!otherTxt.equals('')">
+            AND ${otherCondition} = #{otherTxt}
+            </when>
+            <when test="!stbId.equals('')">
+           AND STB.STB_ID = UPPER(#{stbId})
+            </when>
+            <otherwise>
+                <choose>
+                    <when test='vcheck.equals("3")'>
+                        <if test="!toVersion.equals('') and !fromVersion.equals('')">
+                AND ${versionCondition} BETWEEN #{toVersion} AND #{fromVersion}
+                        </if>
+                    </when>
+                    <when test='vcheck.equals("4")'>
+                        <if test="!toVersion.equals('')">
+                AND ${versionCondition} = #{toVersion}
+                        </if>
+                    </when>
+                    <when test='vcheck.equals("1")'>
+                        <if test="!toVersion.equals('')">
+                AND ${versionCondition} <![CDATA[>=]]> #{toVersion}
+                        </if>
+                    </when>
+                    <when test='vcheck.equals("2")'>
+                        <if test="!toVersion.equals('')">
+                AND ${versionCondition} <![CDATA[<=]]> #{toVersion}
+                        </if>
+                    </when>
+                </choose>
+                <if test="areaQltyList.size != 0 and !areaQltyList.equals('')">
+                AND DDM.TEAM_CD IN
+                    <foreach collection="areaQltyList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="modelNameList.size != 0 and !modelNameList.equals('')">
+                AND PS.MODEL_CODE IN
+                    <foreach collection="modelNameList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="divisionList.size != 0 and !divisionList.equals('')">
+                AND TRIM(STB.SERVICE_CODE) IN
+                    <foreach collection="divisionList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="networkList.size != 0 and !networkList.equals('')">
+                AND STB.NETWORK_BRAND_CODE IN
+                    <foreach collection="networkList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="openingStateList.size != 0 and !openingStateList.equals('')">
+                AND STB.IPTV_STATUS_CODE IN
+                    <foreach collection="openingStateList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="joinProductList.size != 0 and !joinProductList.equals('')">
+                AND STB.ID_PACKAGE IN
+                    <foreach collection="joinProductList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="scrbrTypCdList != null and scrbrTypCdList.size != 0 and !scrbrTypCdList.equals('')">
+                    AND SD.SCRBR_TYP_CD IN
+                    <foreach collection="scrbrTypCdList" item="type" index="index" open="(" close=")" separator=",">
+                        #{type}
+                    </foreach>
+                </if>
+
+                <choose>
+                    <when test='uptime.equals("1")'>
+                        <if test="!fromUptm.equals('') and !toUptm.equals('')">
+                            <choose>
+                                <when test='check.equals("3")'>
+                    AND DDM.STM_UPTM BETWEEN TO_DATE(#{fromUptm}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                          AND TO_DATE(#{toUptm}||'23:59:59','yyyyMMdd HH24:MI:SS')
+                                </when>
+                                <when test="!fromUptm.equals('')">
+                                    <if test='check.equals("4")'>
+                    AND DDM.STM_UPTM BETWEEN TO_DATE(#{fromUptm}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                          AND TO_DATE(#{fromUptm}||'23:59:59','yyyyMMdd HH24:MI:SS')
+                                    </if>
+                                    <if test='check.equals("1")'>
+                    AND DDM.STM_UPTM <![CDATA[>=]]> TO_DATE(#{fromUptm})
+                                    </if>
+                                    <if test='check.equals("2")'>
+                    AND DDM.STM_UPTM <![CDATA[<=]]> TO_DATE(#{fromUptm})+0.99999
+                                    </if>
+                                </when>
+                            </choose>
+                        </if>
+                    </when>
+                    <when test='uptime.equals("2")'>
+                        <choose>
+                            <when test='check.equals("3")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) BETWEEN #{overTimeFrom} and #{overTimeTo} -->
+                    AND DDM.STM_UPTM BETWEEN TRUNC(SYSDATE-#{overTimeTo}) AND TRUNC(SYSDATE-#{overTimeFrom})+0.99999
+                            </when>
+                            <when test="!overTime.equals('')">
+                                <if test='check.equals("4")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) = #{overTime} -->
+                    AND DDM.STM_UPTM BETWEEN TRUNC(SYSDATE-#{overTime}) AND TRUNC(SYSDATE-#{overTime})+0.99999
+                                </if>
+                                <if test='check.equals("1")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) >= #{overTime} -->
+                    AND DDM.STM_UPTM <![CDATA[<=]]> TRUNC(SYSDATE-#{overTime})+0.99999
+                                </if>
+                                <if test='check.equals("2")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) <= #{overTime} -->
+                    AND DDM.STM_UPTM <![CDATA[>=]]> TRUNC(SYSDATE-#{overTime})
+                                </if>
+                            </when>
+                        </choose>
+                    </when>
+                </choose>
+                <if test='stbDivision.equals("02")'>
+                AND LENGTH(STB.USER_SERVICE_NUM) = 10
+                </if>
+                <if test='stbDivision.equals("03")'>
+                AND LENGTH(STB.USER_SERVICE_NUM) != 10
+                </if>
+
+            </otherwise>
+        </choose>
+
+    </select>
+
+
+
+    <!--      검색 조건 없을 때 빠른 Count 쿼리 -->
+    <select id="selectOneTotCntDeviceMstNoCondition" parameterType="com.skb.edmp.admin.dto.device.DeviceDTO" resultType="com.skb.edmp.admin.dto.device.DeviceDTO">
+      SELECT 
+            COUNT(1) TOTAL
+      FROM
+            DM_DVC_MST DDM
+            ,STB
+            ,PHYSICAL_STB PS
+            ,DM_DVC_ACC_MST DADM
+      where
+      		DDM.STB_ID = STB.STB_ID
+            AND DDM.STB_ID = PS.STB_ID (+)
+    </select>
+
+
+
+    <select id="selectOneGroupNm" parameterType="com.skb.edmp.admin.dto.device.DeviceDTO" resultType="com.skb.edmp.admin.dto.device.DeviceDTO">
+        <![CDATA[
+    SELECT LISTAGG(B.DVC_GRP_NM,',') WITHIN GROUP(ORDER BY B.DVC_GRP_NM) DVCGRPNM
+      FROM DM_DVC_GRP_PSNL_MAP A
+          ,DM_DVC_GRP_MST B
+     WHERE 1=1
+       AND A.DVC_GRP_ID = B.DVC_GRP_ID
+       AND A.STB_ID = UPPER(#{stbId})
+      GROUP BY A.STB_ID
+    ]]>
+    </select>
+
+    <select id="selectListTotalDeviceMst" parameterType="com.skb.edmp.admin.dto.device.DeviceDTO" resultType="com.skb.edmp.admin.dto.device.DeviceDTO">
+
+      SELECT
+                                                <!--              DISTINCT -->
+             DDM.STB_ID
+        FROM
+             STB STB
+            ,DM_DVC_MST DDM
+            ,PHYSICAL_STB PS
+                                                <!--             ,DM_DVC_PRVN_MST DDPM -->
+        <if test="!deviceGroup.equals('')">
+            ,DM_DVC_GRP_MST GM
+            ,DM_DVC_GRP_PSNL_MAP GPM
+        </if>
+          WHERE 1=1
+            AND DDM.STB_ID = STB.STB_ID
+            AND DDM.STB_ID = PS.STB_ID (+)
+        <if test="!deviceGroup.equals('')">
+            AND GM.DVC_GRP_ID = GPM.DVC_GRP_ID(+)
+            AND DDM.STB_ID = GPM.STB_ID
+            AND GM.DVC_GRP_FG_CD = '02'
+            AND UPPER(GM.DVC_GRP_NM) LIKE UPPER('%' || #{deviceGroup} || '%')
+        </if>
+        <choose>
+            <!-- <when test="!macAddress.equals('')">
+            AND UPPER(PS.MAC_ADDRESS) = UPPER(#{macAddress})
+        </when> -->
+            <when test="!macAddress.equals('')">
+            AND PS.MAC_ADDRESS = LOWER(#{macAddress})
+            </when>
+            <when test="!otherTxt.equals('')">
+           AND ${otherCondition} = #{otherTxt}
+            </when>
+            <when test="!stbId.equals('')">
+           AND STB.STB_ID = UPPER(#{stbId})
+            </when>
+            <otherwise>
+                <choose>
+                    <when test='vcheck.equals("3")'>
+                        <if test="!toVersion.equals('') and !fromVersion.equals('')">
+                AND ${versionCondition} BETWEEN #{toVersion} AND #{fromVersion}
+                        </if>
+                    </when>
+                    <when test='vcheck.equals("4")'>
+                        <if test="!toVersion.equals('')">
+                AND ${versionCondition} = #{toVersion}
+                        </if>
+                    </when>
+                    <when test='vcheck.equals("1")'>
+                        <if test="!toVersion.equals('')">
+                AND ${versionCondition} <![CDATA[>=]]> #{toVersion}
+                        </if>
+                    </when>
+                    <when test='vcheck.equals("2")'>
+                        <if test="!toVersion.equals('')">
+                AND ${versionCondition} <![CDATA[<=]]> #{toVersion}
+                        </if>
+                    </when>
+                </choose>
+
+                <if test="areaQltyList.size != 0 and !areaQltyList.equals('')">
+                AND DDM.TEAM_CD IN
+                    <foreach collection="areaQltyList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="modelNameList.size != 0 and !modelNameList.equals('')">
+                AND PS.MODEL_CODE IN
+                    <foreach collection="modelNameList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="divisionList.size != 0 and !divisionList.equals('')">
+                AND TRIM(STB.SERVICE_CODE) IN
+                    <foreach collection="divisionList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="networkList.size != 0 and !networkList.equals('')">
+                AND STB.NETWORK_BRAND_CODE IN
+                    <foreach collection="networkList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="openingStateList.size != 0 and !openingStateList.equals('')">
+                AND STB.IPTV_STATUS_CODE IN
+                    <foreach collection="openingStateList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <if test="joinProductList.size != 0 and !joinProductList.equals('')">
+                AND STB.ID_PACKAGE IN
+                    <foreach collection="joinProductList" item="type" index="index" open="(" close=")" separator=",">
+                #{type}
+                    </foreach>
+                </if>
+
+                <choose>
+                    <when test='uptime.equals("1")'>
+                        <if test="!fromUptm.equals('') and !toUptm.equals('')">
+                            <choose>
+                                <when test='check.equals("3")'>
+                    AND DDM.STM_UPTM BETWEEN TO_DATE(#{fromUptm}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                          AND TO_DATE(#{toUptm}||'23:59:59','yyyyMMdd HH24:MI:SS')
+                                </when>
+                                <when test="!fromUptm.equals('')">
+                                    <if test='check.equals("4")'>
+                    AND DDM.STM_UPTM BETWEEN TO_DATE(#{fromUptm}||'00:00:00','yyyyMMdd HH24:MI:SS')
+                                          AND TO_DATE(#{fromUptm}||'23:59:59','yyyyMMdd HH24:MI:SS')
+                                    </if>
+                                    <if test='check.equals("1")'>
+                    AND DDM.STM_UPTM <![CDATA[>=]]> TO_DATE(#{fromUptm})
+                                    </if>
+                                    <if test='check.equals("2")'>
+                    AND DDM.STM_UPTM <![CDATA[<=]]> TO_DATE(#{fromUptm})+0.99999
+                                    </if>
+                                </when>
+                            </choose>
+                        </if>
+                    </when>
+                    <when test='uptime.equals("2")'>
+                        <choose>
+                            <when test='check.equals("3")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) BETWEEN #{overTimeFrom} and #{overTimeTo} -->
+                    AND DDM.STM_UPTM BETWEEN TRUNC(SYSDATE-#{overTimeTo}) AND TRUNC(SYSDATE-#{overTimeFrom})+0.99999
+                            </when>
+                            <when test="!overTime.equals('')">
+                                <if test='check.equals("4")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) = #{overTime} -->
+                    AND DDM.STM_UPTM BETWEEN TRUNC(SYSDATE-#{overTime}) AND TRUNC(SYSDATE-#{overTime})+0.99999
+                                </if>
+                                <if test='check.equals("1")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) >= #{overTime} -->
+                    AND STM_UPTM <![CDATA[<=]]> TRUNC(SYSDATE-#{overTime})+0.99999
+                                </if>
+                                <if test='check.equals("2")'>
+                    <!-- AND TRUNC(SYSDATE) - TRUNC(DDM.STM_UPTM) <= #{overTime} -->
+                    AND STM_UPTM <![CDATA[>=]]> TRUNC(SYSDATE-#{overTime})
+                                </if>
+                            </when>
+                        </choose>
+                    </when>
+                </choose>
+
+                <if test='stbDivision.equals("02")'>
+                AND LENGTH(STB.USER_SERVICE_NUM) = 10
+                </if>
+                <if test='stbDivision.equals("03")'>
+                AND LENGTH(STB.USER_SERVICE_NUM) != 10
+                </if>
+
+            </otherwise>
+        </choose>
+
+    </select>
+
+    <select id="selectListTotalMassiveSearch" parameterType="com.skb.edmp.admin.dto.device.DeviceDTO" resultType="com.skb.edmp.admin.dto.device.DeviceDTO">
+      SELECT
+             DDM.STB_ID
+        FROM
+             STB STB
+            ,DM_DVC_MST DDM
+            ,PHYSICAL_STB PS
+                                                <!--             ,DM_DVC_PRVN_MST DDPM -->
+          WHERE 1=1
+            AND DDM.STB_ID = STB.STB_ID
+            AND DDM.STB_ID = PS.STB_ID (+)
+                                                <!--             AND DDM.STB_ID = DDPM.STB_ID (+) -->
+        <!-- <if test="searchData.size != 0">
+            AND UPPER(${searchType}) IN
+            <foreach collection="searchData" item="type" index="index" open="(" close=")" separator=",">
+            UPPER(#{type})
+            </foreach>
+        </if> -->
+        <if test="searchData.size != 0">
+	            AND ${searchType} IN
+            <choose>
+                <when test='searchType.equals("ddm.stb_id")'>
+                    <foreach collection="searchData" item="type" index="index" open="(" close=")" separator=",">
+		            UPPER(#{type})
+                    </foreach>
+                </when>
+                <otherwise>
+                    <foreach collection="searchData" item="type" index="index" open="(" close=")" separator=",">
+		            LOWER(#{type})
+                    </foreach>
+                </otherwise>
+            </choose>
+        </if>
+    </select>
+
+
+</mapper>

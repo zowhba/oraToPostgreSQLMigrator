@@ -67,13 +67,15 @@ def init_tables():
             db_schema    VARCHAR(128),
             db_user      VARCHAR(200) NOT NULL,
             db_pw        VARCHAR(500) NOT NULL,
+            system_prompt TEXT,
             created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # 기존 테이블에 db_schema 컬럼이 없을 경우 추가 (마이그레이션 보장)
+    # 기존 테이블 마이그레이션
     cur.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS db_schema VARCHAR(128)")
+    cur.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS system_prompt TEXT")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS conversions (
@@ -107,9 +109,13 @@ def init_tables():
             dry_run_success    BOOLEAN,
             dry_run_result     JSONB,
             ai_guide_report    TEXT,
+            confidence_score   FLOAT DEFAULT 0.0,
             created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # 기존 테이블 마이그레이션
+    cur.execute("ALTER TABLE query_conversions ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS app_settings (
@@ -119,12 +125,30 @@ def init_tables():
         )
     """)
 
-    # 기본 모델 설정 (gpt-5.2-chat)
+    # 기본 모델 설정
     cur.execute("""
         INSERT INTO app_settings (setting_key, setting_value)
-        VALUES ('active_model', 'gpt-5.2-chat')
+        VALUES ('active_model', 'haiku-4.5')
         ON CONFLICT (setting_key) DO NOTHING
     """)
+
+    # 전역 기본 프롬프트 설정
+    default_prompt = (
+        "당신은 Oracle → PostgreSQL 마이그레이션 전문가입니다. "
+        "MyBatis XML 쿼리를 PostgreSQL 호환으로 변환하세요. "
+        "반드시 지정된 JSON 형식으로만 응답하며, JSON 외부에 어떠한 인사말이나 부연 설명도 하지 마십시오. "
+        "AI 분석 리포트는 다음 형식을 엄격히 준수하십시오: "
+        "1. 최상단에 '### 변환 확신도: XX%'를 반드시 기입하십시오. "
+        "2. 그 아래에 '#### 주요 변경 사항', '#### 주의사항', '#### 테스트 권장사항' 섹션을 순서대로 작성하십시오. "
+        "3. 난이도가 낮은 경우 요약하여 짧게 작성하고, 난이도가 높은 경우 상세히 기술하십시오. "
+        "★ 중요: 절대로 쿼리 내용을 생략하거나 말줄임표(...)를 사용하지 마십시오. "
+        "전체 SQL을 처음부터 끝까지 완전하게 작성하십시오."
+    )
+    cur.execute("""
+        INSERT INTO app_settings (setting_key, setting_value)
+        VALUES ('global_system_prompt', %s)
+        ON CONFLICT (setting_key) DO NOTHING
+    """, (default_prompt,))
 
     cur.close()
     logger.info("[AppDB] 테이블 초기화 완료")

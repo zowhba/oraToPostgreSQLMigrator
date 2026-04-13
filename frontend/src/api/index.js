@@ -353,4 +353,12 @@ export async function getHistoryDetail(id) {
   return response.data
 }
 
+/**
+ * 전역 설정 조회 - GET /api/settings
+ */
+export async function getSettings() {
+  const response = await api.get('/settings')
+  return response.data
+}
+
 export default api

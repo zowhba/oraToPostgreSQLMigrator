@@ -100,7 +100,15 @@
                       </div>
                     </td>
                     <td>
-                      <button class="btn-text" @click="viewDetail(attempt)">결과 보기</button>
+                      <div class="action-btns">
+                        <button class="btn-text" @click="viewDetail(attempt)">결과 보기</button>
+                        <button
+                          class="btn-delete"
+                          :disabled="!isAdmin"
+                          :title="isAdmin ? '히스토리를 삭제합니다.' : 'Admin 모드에서만 삭제할 수 있습니다.'"
+                          @click="deleteRecord(attempt.conversion_id)"
+                        >삭제</button>
+                      </div>
                     </td>
                   </tr>
                 </tbody>
@@ -150,7 +158,15 @@
                 </div>
               </td>
               <td>
-                <button class="btn-text" @click="viewDetail(item)">결과 보기</button>
+                <div class="action-btns">
+                  <button class="btn-text" @click="viewDetail(item)">결과 보기</button>
+                  <button
+                    class="btn-delete"
+                    :disabled="!isAdmin"
+                    :title="isAdmin ? '히스토리를 삭제합니다.' : 'Admin 모드에서만 삭제할 수 있습니다.'"
+                    @click="deleteRecord(item.conversion_id)"
+                  >삭제</button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -168,7 +184,7 @@
 </template>
 
 <script>
-import { getHistory, getHistoryList } from '../api'
+import { getHistory, getHistoryList, deleteHistory } from '../api'
 
 export default {
   name: 'HistoryView',
@@ -179,10 +195,12 @@ export default {
       projects: [],
       flatHistory: [],
       expandedProjects: {},
-      expandedFiles: {}
+      expandedFiles: {},
+      isAdmin: false
     }
   },
   mounted() {
+    this.isAdmin = sessionStorage.getItem('sql_migrator_admin_authed') === '1'
     this.refreshHistory()
   },
   watch: {
@@ -276,6 +294,21 @@ export default {
         path: '/convert',
         query: { historyId: attempt.conversion_id }
       })
+    },
+
+    async deleteRecord(conversionId) {
+      if (!this.isAdmin) {
+        alert('Admin 모드에서만 삭제할 수 있습니다. URL 끝에 /admin 으로 접속하세요.')
+        return
+      }
+      if (!confirm(`이력 #${conversionId}을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return
+      try {
+        await deleteHistory(conversionId)
+        await this.refreshHistory()
+      } catch (error) {
+        console.error('Delete failed:', error)
+        alert('삭제 중 오류가 발생했습니다.')
+      }
     }
   }
 }
@@ -283,7 +316,7 @@ export default {
 
 <style scoped>
 .history-view {
-  max-width: 1000px;
+  max-width: 1100px;
   margin: 0 auto;
 }
 
@@ -583,6 +616,43 @@ export default {
 .btn-text:hover {
   background: #e0e7ff;
   color: #4338ca;
+}
+
+.btn-delete {
+  background: #fff0f0;
+  border: none;
+  color: #dc2626;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.btn-delete:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.btn-delete:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-delete:disabled:hover {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+.action-btns {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .badge {

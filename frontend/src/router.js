@@ -4,6 +4,7 @@ import SettingView from './views/SettingView.vue'
 import ConvertView from './views/ConvertView.vue'
 import HistoryView from './views/HistoryView.vue'
 import GlobalSettingsView from './views/GlobalSettingsView.vue'
+import AdminView from './views/AdminView.vue'
 
 const routes = [
   {
@@ -34,6 +35,11 @@ const routes = [
     path: '/history',
     name: 'History',
     component: HistoryView
+  },
+  {
+    path: '/admin',
+    name: 'Admin',
+    component: AdminView
   }
 ]
 

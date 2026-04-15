@@ -12,6 +12,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from starlette.responses import StreamingResponse
 import uvicorn
 
@@ -159,6 +161,16 @@ async def log_request_response(request: Request, call_next):
 app.include_router(project_router)
 app.include_router(convert_router)
 app.include_router(settings_router)
+
+# ── 프론트엔드 정적 파일 서빙 (프로덕션) ──
+FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+if os.path.isdir(FRONTEND_DIST):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str):
+        index = os.path.join(FRONTEND_DIST, "index.html")
+        return FileResponse(index)
 
 
 @app.get("/", tags=["Health"])

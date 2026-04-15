@@ -28,14 +28,57 @@
     </nav>
 
     <div class="sidebar-footer">
+      <div v-if="isAdmin" class="admin-status">
+        <div class="admin-badge">
+          <span class="admin-dot"></span>
+          <span class="admin-label">ADMIN 모드</span>
+        </div>
+        <button class="admin-logout" @click="adminLogout">로그아웃</button>
+      </div>
       <p class="footer-text">Oracle to PostgreSQL</p>
     </div>
   </aside>
 </template>
 
 <script>
+const ADMIN_FLAG_KEY = 'sql_migrator_admin_authed'
+
 export default {
-  name: 'AppSidebar'
+  name: 'AppSidebar',
+  data() {
+    return {
+      isAdmin: false
+    }
+  },
+  mounted() {
+    this.refreshAdminFlag()
+    window.addEventListener('storage', this.refreshAdminFlag)
+    window.addEventListener('admin-auth-changed', this.refreshAdminFlag)
+  },
+  beforeUnmount() {
+    window.removeEventListener('storage', this.refreshAdminFlag)
+    window.removeEventListener('admin-auth-changed', this.refreshAdminFlag)
+  },
+  watch: {
+    $route() {
+      this.refreshAdminFlag()
+    }
+  },
+  methods: {
+    refreshAdminFlag() {
+      this.isAdmin = sessionStorage.getItem(ADMIN_FLAG_KEY) === '1'
+    },
+    adminLogout() {
+      if (!confirm('Admin 모드에서 로그아웃하시겠습니까?')) return
+      sessionStorage.removeItem(ADMIN_FLAG_KEY)
+      this.isAdmin = false
+      window.dispatchEvent(new Event('admin-auth-changed'))
+      if (this.$route.path === '/admin') {
+        // AdminView가 다시 패스워드 화면으로 전환되도록 트리거
+        this.$router.replace('/admin')
+      }
+    }
+  }
 }
 </script>
 
@@ -107,8 +150,62 @@ export default {
 }
 
 .sidebar-footer {
-  padding: 20px;
+  padding: 16px;
   border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+.admin-status {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.admin-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.admin-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.admin-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fecaca;
+  letter-spacing: 0.5px;
+}
+
+.admin-logout {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f8fafc;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.admin-logout:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.5);
 }
 
 .footer-text {

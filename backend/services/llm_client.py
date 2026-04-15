@@ -171,8 +171,19 @@ def _call_claude(model: str, system_prompt: str, user_prompt: str) -> dict:
         raise Exception(f"Claude API Error {resp.status_code}: {resp.text}")
     
     result = resp.json()
-    content = result["content"][0]["text"]
-    
+    stop_reason = result.get("stop_reason", "")
+    content = result.get("content", [{}])[0].get("text", "")
+
+    # ── 토큰 한도 초과 감지 ──
+    if stop_reason == "max_tokens":
+        raise ValueError(
+            f"AI 응답이 중간에 잘렸습니다 (max_tokens={Config.LLM_MAX_TOKENS} 한도 제한). "
+            f"원본 쿼리가 너무 길 수 있습니다. .env의 LLM_MAX_TOKENS 값을 늘리거나 쿼리를 분할해서 시도하세요."
+        )
+
+    if not content.strip():
+        raise ValueError("AI가 빈 응답을 반환했습니다. API Key, 모델 승인 상태를 확인하세요.")
+
     # JSON 추출 고도화 (마크다운 백택 및 기타 텍스트 혼입 대응)
     try:
         # 1. 시도: 전체 내용에서 가장 바깥쪽 { } 찾기
@@ -184,20 +195,23 @@ def _call_claude(model: str, system_prompt: str, user_prompt: str) -> dict:
             try:
                 return json.loads(json_str)
             except json.JSONDecodeError:
-                # 2. 시도: 만약 뒤에 다른 중괄호가 섞여서 실패하는 경우(Extra data 등), 
+                # 2. 시도: 만약 뒤에 다른 중괄호가 섞여서 실패하는 경우(Extra data 등),
                 # 앞에서부터 하나씩 잘라가며 첫 번째 유효한 JSON 객체 찾기
                 for i in range(end_idx, start_idx, -1):
                     try:
                         return json.loads(content[start_idx:i+1])
                     except json.JSONDecodeError:
                         continue
-        
+
         return json.loads(content)
     except json.JSONDecodeError as e:
+        error_str = str(e).lower()
         logger.error(f"[Claude] JSON 파싱 실패: {e}. 원본 내용 일부: {content[:200]}...")
-        # 응답이 잘렸을 가능성이 있는 경우에 대한 힌트 추가
-        if "unterminated string" in str(e).lower():
-            raise ValueError("AI 응답이 중간에 끊겼습니다 (Token Limit). 더 짧은 쿼리로 시도하거나 설정을 확인하세요.")
+        if "unterminated string" in error_str or "char 0" in error_str:
+            raise ValueError(
+                f"AI 응답이 중간에 잘렸습니다 (Token Limit 초과 추정). "
+                f"더 짧은 쿼리로 시도하거나 .env의 LLM_MAX_TOKENS 값({Config.LLM_MAX_TOKENS})을 늘려주세요."
+            )
         raise
 
 

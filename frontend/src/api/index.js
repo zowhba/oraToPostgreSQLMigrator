@@ -361,4 +361,39 @@ export async function getSettings() {
   return response.data
 }
 
+/**
+ * 히스토리 삭제 - DELETE /api/history/{id}
+ */
+export async function deleteHistory(id) {
+  const response = await api.delete(`/history/${id}`)
+  return response.data
+}
+
+// ============================================
+// Admin 모드 API
+// ============================================
+
+export async function adminLogin(password) {
+  const response = await api.post('/settings/admin/login', { password })
+  return response.data
+}
+
+export async function changeAdminPassword(oldPassword, newPassword) {
+  const response = await api.post('/settings/admin/password', {
+    old_password: oldPassword,
+    new_password: newPassword
+  })
+  return response.data
+}
+
+export async function getEnabledModels() {
+  const response = await api.get('/settings/enabled-models')
+  return response.data
+}
+
+export async function setEnabledModels(models) {
+  const response = await api.post('/settings/enabled-models', { models })
+  return response.data
+}
+
 export default api

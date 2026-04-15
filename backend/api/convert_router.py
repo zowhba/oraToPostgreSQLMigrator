@@ -121,3 +121,28 @@ async def get_history_detail(conversion_id: int):
     except Exception as e:
         logger.error("[History] 상세 조회 실패: %s", str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/history/{conversion_id}")
+async def delete_history(conversion_id: int):
+    """특정 변환 히스토리 삭제 (하위 query_conversions 포함)"""
+    try:
+        conn = database.get_connection()
+        cur = conn.cursor()
+
+        cur.execute("SELECT conversion_id FROM conversions WHERE conversion_id = %s", (conversion_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
+
+        # query_conversions는 ON DELETE CASCADE로 자동 삭제됨
+        cur.execute("DELETE FROM conversions WHERE conversion_id = %s", (conversion_id,))
+        conn.commit()
+        cur.close()
+
+        logger.info("[History] 히스토리 삭제 완료: conversion_id=%d", conversion_id)
+        return {"status": "success", "message": f"히스토리 #{conversion_id}이 삭제되었습니다."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[History] 히스토리 삭제 실패: %s", str(e))
+        raise HTTPException(status_code=500, detail=str(e))

@@ -150,6 +150,20 @@ def init_tables():
         ON CONFLICT (setting_key) DO NOTHING
     """, (default_prompt,))
 
+    # Admin 패스워드 (초기값: 8838)
+    cur.execute("""
+        INSERT INTO app_settings (setting_key, setting_value)
+        VALUES ('admin_password', '8838')
+        ON CONFLICT (setting_key) DO NOTHING
+    """)
+
+    # 활성화된 LLM 모델 목록 (JSON 배열) - 기본은 모든 모델 활성화
+    cur.execute("""
+        INSERT INTO app_settings (setting_key, setting_value)
+        VALUES ('enabled_models', '["gpt-5.2-chat","haiku-4.5","sonnet-4.5","opus-4.6"]')
+        ON CONFLICT (setting_key) DO NOTHING
+    """)
+
     cur.close()
     logger.info("[AppDB] 테이블 초기화 완료")
 

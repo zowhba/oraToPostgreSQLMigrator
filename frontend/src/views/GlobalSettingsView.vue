@@ -14,8 +14,8 @@
       <div class="form-group">
         <label>활성 AI 모델</label>
         <div class="model-selector">
-          <div 
-            v-for="model in models" 
+          <div
+            v-for="model in visibleModels"
             :key="model.id"
             class="model-option"
             :class="{ active: activeModel === model.id }"
@@ -59,12 +59,18 @@ export default {
       activeModel: 'haiku-4.5',
       globalSystemPrompt: '',
       loading: false,
+      enabledModelIds: ['gpt-5.2-chat', 'haiku-4.5', 'sonnet-4.5', 'opus-4.6'],
       models: [
         { id: 'gpt-5.2-chat', name: 'Azure ChatGPT 5.2', desc: '기본 모델 (빠르고 안정적)' },
         { id: 'haiku-4.5', name: 'Claude 4.5 Haiku', desc: '매우 빠르고 지능적인 최신 경량 모델' },
         { id: 'sonnet-4.5', name: 'Claude 4.5 Sonnet', desc: '성능과 속도의 최적 밸런스 (추천)' },
         { id: 'opus-4.6', name: 'Claude 4.6 Opus', desc: '현존 최강의 추론 성능을 가진 프리미엄 모델' }
       ]
+    }
+  },
+  computed: {
+    visibleModels() {
+      return this.models.filter(m => this.enabledModelIds.includes(m.id))
     }
   },
   methods: {
@@ -81,6 +87,20 @@ export default {
         }
       } catch (error) {
         console.error('Failed to fetch settings:', error)
+      }
+    },
+    async fetchEnabledModels() {
+      try {
+        const response = await axios.get('/api/settings/enabled-models')
+        if (response.data && Array.isArray(response.data.models)) {
+          this.enabledModelIds = response.data.models
+          // 현재 active 모델이 비활성화된 경우 첫 번째 활성 모델로 폴백
+          if (!this.enabledModelIds.includes(this.activeModel) && this.enabledModelIds.length > 0) {
+            this.activeModel = this.enabledModelIds[0]
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch enabled models:', error)
       }
     },
     selectModel(modelId) {
@@ -104,8 +124,9 @@ export default {
       }
     }
   },
-  mounted() {
-    this.fetchSettings()
+  async mounted() {
+    await this.fetchSettings()
+    await this.fetchEnabledModels()
   }
 }
 </script>

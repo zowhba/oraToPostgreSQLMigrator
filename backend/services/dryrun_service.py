@@ -160,6 +160,11 @@ def _strip_mybatis_tags(sql_xml: str) -> str:
     #    <![CDATA[...]]> 는 일반 XML 태그 패턴(<tag>)에 매칭되지 않으므로 반드시 먼저 처리해야 함
     text = re.sub(r"<!\[CDATA\[(.*?)]]>", lambda m: m.group(1), text, flags=re.DOTALL | re.IGNORECASE)
 
+    # 0-1. XML 엔티티 복원 (&gt; → >, &lt; → <, &amp; → &, &quot; → ", &apos; → ')
+    #      MyBatis XML 내에서 비교 연산자가 엔티티로 인코딩된 경우 복원해야 PostgreSQL이 인식함
+    text = text.replace('&gt;', '>').replace('&lt;', '<')
+    text = text.replace('&amp;', '&').replace('&quot;', '"').replace('&apos;', "'")
+
     # 1. SQL 비교 연산자 보호
     text, restore_map = _protect_sql_operators(text)
 
@@ -262,10 +267,8 @@ def _substitute_mybatis_params(sql: str) -> str:
     # #{...} → NULL
     sql = re.sub(r"#\{[^}]*\}", "NULL", sql)
     
-    # ${...} → 1 (문자열)
-    # 단, ORDER BY 뒤에 오는 경우 정렬 방향으로 오해받아 에러날 수 있으므로
-    # 'ORDER BY ... 1' 형태가 되면 1을 제거하거나 ASC로 처리 (sanitize에서 이미 일부 처리)
-    sql = re.sub(r"\$\{[^}]*\}", "1", sql)
+    # ${...} → '1' (문자열로 치환하여 VARCHAR/INTEGER 양쪽 호환성 확보)
+    sql = re.sub(r"\$\{[^}]*\}", "'1'", sql)
     
     # 치환 후 다시 한번 sanitize 실행 (중복 공백이나 찌꺼기 제거)
     sql = _sanitize_sql_for_dryrun(sql)

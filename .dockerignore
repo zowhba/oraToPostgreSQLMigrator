@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# 환경변수 (이미지에 포함 금지)
+.env
+.env.local
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# 가상환경
+venv/
+.venv/
+env/
+
+# Node.js
+node_modules/
+frontend/node_modules/
+
+# 프론트엔드 빌드 결과물 (Docker 내부에서 빌드)
+frontend/dist/
+
+# 로그
+logs/
+*.log
+
+# 테스트 데이터
+test_data/
+
+# 문서
+*.md
+
+# IDE
+.vscode/
+.idea/
+*.swp

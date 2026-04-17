@@ -76,6 +76,8 @@ class QueryResult(BaseModel):
     dry_run_result: DryRunResult
     ai_guide_report: str = Field("", description="전문가용 심층 리포트")
     confidence_score: float = Field(0.0, description="AI 변환 확신도 (0.0 ~ 1.0)")
+    input_tokens: int = Field(0, description="LLM 입력 토큰 수")
+    output_tokens: int = Field(0, description="LLM 출력 토큰 수")
 
 
 class ConvertResponse(BaseModel):
@@ -84,4 +86,6 @@ class ConvertResponse(BaseModel):
     xml_file_name: str = Field("", description="원본 파일명")
     duration_seconds: float = Field(0.0, description="전체 변환 소요 시간")
     used_model: Optional[str] = Field(None, description="변환에 사용된 LLM 모델명")
+    total_input_tokens: int = Field(0, description="전체 입력 토큰 합계")
+    total_output_tokens: int = Field(0, description="전체 출력 토큰 합계")
     queries: list[QueryResult]

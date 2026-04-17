@@ -32,7 +32,7 @@
           <div class="step-num">3</div>
           <div class="step-icon">🤖</div>
           <div class="step-label">AI 변환</div>
-          <div class="step-desc">Azure OpenAI GPT 자동 변환</div>
+          <div class="step-desc">LLM 자동 변환 (멀티모델)</div>
         </div>
         <div class="pipeline-arrow">→</div>
         <div class="pipeline-step">
@@ -300,6 +300,134 @@
             <strong>해결:</strong> 원본 XML 확인. DDL(CREATE, ALTER 등)은 Dry-run 대상이 아님
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- 시스템 프롬프트 우선순위 -->
+    <section class="guide-section">
+      <h2 class="section-title">📝 시스템 프롬프트 적용 우선순위</h2>
+      <p class="section-desc">
+        AI 변환 시 사용되는 시스템 프롬프트는 3단계 우선순위를 가집니다.
+        상위 프롬프트가 설정되어 있으면 하위는 무시됩니다.
+      </p>
+      <div class="priority-list">
+        <div class="priority-item priority-1">
+          <div class="priority-rank">1순위</div>
+          <div class="priority-content">
+            <strong>1회성 시스템 프롬프트 (변환 화면)</strong>
+            <p>변환 요청 시 "시스템 프롬프트 직접 입력" 영역에 작성한 프롬프트.<br>
+            해당 요청에만 적용되며 저장되지 않습니다.</p>
+          </div>
+        </div>
+        <div class="priority-arrow-down">▼</div>
+        <div class="priority-item priority-2">
+          <div class="priority-rank">2순위</div>
+          <div class="priority-content">
+            <strong>프로젝트별 시스템 프롬프트 (프로젝트 설정)</strong>
+            <p>프로젝트 설정에서 입력한 프롬프트.<br>
+            해당 프로젝트의 모든 변환에 적용됩니다. 프로젝트별 특성에 맞는 지침을 추가할 때 유용합니다.</p>
+          </div>
+        </div>
+        <div class="priority-arrow-down">▼</div>
+        <div class="priority-item priority-3">
+          <div class="priority-rank">3순위</div>
+          <div class="priority-content">
+            <strong>전역 기본 시스템 프롬프트 (전역 설정)</strong>
+            <p>전역 설정 > LLM 모델 설정에서 관리하는 기본 프롬프트.<br>
+            위 두 가지가 모두 비어있을 때 사용됩니다.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 토큰 모니터링 & 과금 정책 -->
+    <section class="guide-section">
+      <h2 class="section-title">💰 토큰 사용량 모니터링 & 과금 정책</h2>
+
+      <h3 class="sub-title">토큰 사용량 추적</h3>
+      <p class="section-desc">
+        모든 LLM 변환 요청에 대해 입력(Input) / 출력(Output) 토큰 사용량이 자동으로 기록됩니다.
+      </p>
+      <div class="token-guide-grid">
+        <div class="token-guide-item">
+          <div class="token-guide-icon">📄</div>
+          <div>
+            <strong>요청 단위</strong>
+            <p>작업 히스토리의 각 시도(Attempt)마다 해당 배치의 총 입력/출력 토큰 수가 표시됩니다.</p>
+          </div>
+        </div>
+        <div class="token-guide-item">
+          <div class="token-guide-icon">📁</div>
+          <div>
+            <strong>프로젝트 단위</strong>
+            <p>계층형 히스토리에서 프로젝트 헤더에 해당 프로젝트의 누적 토큰 사용량과 전체 예상 비용이 표시됩니다.</p>
+          </div>
+        </div>
+        <div class="token-guide-item">
+          <div class="token-guide-icon">💵</div>
+          <div>
+            <strong>비용 예측</strong>
+            <p>각 요청의 사용 모델과 토큰 수를 기반으로 원화(KRW) 기준 예상 비용이 자동 계산됩니다.<br>
+            <span class="field-tip">환율 기준: 1 USD = 1,450 KRW (고정)</span></p>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub-title">과금 정책 관리</h3>
+      <p class="section-desc">
+        전역 설정 > LLM 모델 설정 하단의 <strong>모델별 과금 정책</strong> 테이블에서 각 모델의 토큰 단가를 조회하고 편집할 수 있습니다.
+      </p>
+      <div class="pricing-guide-table">
+        <div class="pricing-guide-row header">
+          <div>항목</div>
+          <div>설명</div>
+        </div>
+        <div class="pricing-guide-row">
+          <div><code>입력 ($/1M tokens)</code></div>
+          <div>모델에 전송되는 프롬프트 + 컨텍스트의 100만 토큰당 USD 단가</div>
+        </div>
+        <div class="pricing-guide-row">
+          <div><code>출력 ($/1M tokens)</code></div>
+          <div>모델이 생성하는 응답의 100만 토큰당 USD 단가</div>
+        </div>
+      </div>
+      <div class="info-box" style="margin-top: 16px;">
+        <strong>💡 과금 단가가 변경되면:</strong> 전역 설정에서 단가를 수정하고 저장하세요. 이후 조회되는 히스토리의 예상 비용에 즉시 반영됩니다.
+        기존 히스토리의 비용도 최신 단가로 재계산되어 표시됩니다.
+      </div>
+    </section>
+
+    <!-- LLM 모델 관리 -->
+    <section class="guide-section">
+      <h2 class="section-title">🤖 LLM 모델 관리</h2>
+      <p class="section-desc">
+        여러 AI 모델을 지원하며, 용도에 맞게 선택하여 사용할 수 있습니다.
+      </p>
+      <div class="model-guide-grid">
+        <div class="model-guide-card">
+          <div class="model-guide-name">Claude 4.5 Haiku</div>
+          <div class="model-guide-trait">가장 경제적</div>
+          <p>빠른 속도와 합리적인 비용. 단순한 쿼리 변환에 적합합니다.</p>
+        </div>
+        <div class="model-guide-card">
+          <div class="model-guide-name">Azure ChatGPT 5.2</div>
+          <div class="model-guide-trait">안정적</div>
+          <p>Azure 인프라 기반의 안정적인 성능. 기본 모델로 적합합니다.</p>
+        </div>
+        <div class="model-guide-card">
+          <div class="model-guide-name">Claude 4.5 Sonnet</div>
+          <div class="model-guide-trait">균형 (추천)</div>
+          <p>성능과 비용의 최적 밸런스. 대부분의 변환 작업에 권장됩니다.</p>
+        </div>
+        <div class="model-guide-card">
+          <div class="model-guide-name">Claude 4.6 Opus</div>
+          <div class="model-guide-trait">최고 성능</div>
+          <p>최강의 추론 성능. 복잡한 쿼리나 정밀한 변환이 필요할 때 사용합니다.</p>
+        </div>
+      </div>
+      <div class="info-box" style="margin-top: 16px;">
+        <strong>⚙️ 모델 전환:</strong> 전역 설정에서 활성 모델을 변경할 수 있습니다.
+        Admin 모드에서는 사용 가능한 모델 목록을 제한할 수도 있습니다.
       </div>
     </section>
 
@@ -803,6 +931,189 @@ export default {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: #1e293b;
+}
+
+/* ─── 프롬프트 우선순위 ─── */
+.priority-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.priority-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px 20px;
+  border-radius: 10px;
+  width: 100%;
+}
+
+.priority-1 {
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+  border: 1px solid #93c5fd;
+}
+
+.priority-2 {
+  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+  border: 1px solid #86efac;
+}
+
+.priority-3 {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.priority-rank {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.priority-content strong {
+  font-size: 14px;
+  color: #1e293b;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.priority-content p {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.priority-arrow-down {
+  color: #94a3b8;
+  font-size: 16px;
+  padding: 4px 0;
+}
+
+/* ─── 토큰 모니터링 가이드 ─── */
+.token-guide-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.token-guide-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.token-guide-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.token-guide-item strong {
+  font-size: 14px;
+  color: #1e293b;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.token-guide-item p {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.pricing-guide-table {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.pricing-guide-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.pricing-guide-row:last-child {
+  border-bottom: none;
+}
+
+.pricing-guide-row > div {
+  padding: 12px 16px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.pricing-guide-row > div:first-child {
+  border-right: 1px solid #e2e8f0;
+}
+
+.pricing-guide-row.header {
+  background: #f1f5f9;
+  font-weight: 700;
+  color: #374151;
+}
+
+.pricing-guide-row code {
+  background: #e2e8f0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #1e293b;
+}
+
+/* ─── LLM 모델 가이드 ─── */
+.model-guide-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.model-guide-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.model-guide-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.model-guide-trait {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6366f1;
+  background: #eef2ff;
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.model-guide-card p {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.5;
 }
 
 /* ─── 푸터 ─── */

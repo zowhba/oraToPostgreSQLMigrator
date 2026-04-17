@@ -42,6 +42,12 @@
             <span class="project-id">({{ project.project_id }})</span>
           </div>
           <div class="project-stats">
+            <span class="badge badge-cost" v-if="project.total_cost_krw > 0" title="프로젝트 전체 예상 비용">
+              ₩{{ formatCost(project.total_cost_krw) }}
+            </span>
+            <span class="badge badge-token" v-if="project.total_input_tokens > 0" title="총 토큰">
+              {{ formatTokens(project.total_input_tokens + project.total_output_tokens) }} tk
+            </span>
             <span class="badge badge-info">파일 {{ project.files.length }}개</span>
           </div>
         </div>
@@ -75,6 +81,8 @@
                     <th>Dry-run 성공</th>
                     <th>소요 시간</th>
                     <th>LLM 모델</th>
+                    <th>토큰 (In/Out)</th>
+                    <th>예상 비용</th>
                     <th>난이도 분포</th>
                     <th>기능</th>
                   </tr>
@@ -91,6 +99,16 @@
                       </div>
                     </td>
                     <td><span class="model-badge">{{ attempt.used_model || '-' }}</span></td>
+                    <td class="token-cell">
+                      <span v-if="attempt.input_tokens || attempt.output_tokens" class="token-info">
+                        {{ formatTokens(attempt.input_tokens) }} / {{ formatTokens(attempt.output_tokens) }}
+                      </span>
+                      <span v-else class="token-na">-</span>
+                    </td>
+                    <td class="cost-cell">
+                      <span v-if="attempt.cost_krw > 0" class="cost-badge">₩{{ formatCost(attempt.cost_krw) }}</span>
+                      <span v-else class="token-na">-</span>
+                    </td>
                     <td class="attempt-duration">{{ attempt.duration }}초</td>
                     <td>
                       <div class="level-mini-badges">
@@ -131,6 +149,8 @@
               <th>파일명</th>
               <th>Dry-run 성공률</th>
               <th>LLM 모델</th>
+              <th>토큰 (In/Out)</th>
+              <th>예상 비용</th>
               <th>소요시간</th>
               <th>난이도 분포</th>
               <th>기능</th>
@@ -149,6 +169,16 @@
                 </div>
               </td>
                 <td><span class="model-badge">{{ item.used_model || '-' }}</span></td>
+                <td class="token-cell">
+                  <span v-if="item.input_tokens || item.output_tokens" class="token-info">
+                    {{ formatTokens(item.input_tokens) }} / {{ formatTokens(item.output_tokens) }}
+                  </span>
+                  <span v-else class="token-na">-</span>
+                </td>
+                <td class="cost-cell">
+                  <span v-if="item.cost_krw > 0" class="cost-badge">₩{{ formatCost(item.cost_krw) }}</span>
+                  <span v-else class="token-na">-</span>
+                </td>
                 <td>{{ item.duration }}초</td>
                 <td>
                 <div class="level-mini-badges">
@@ -289,6 +319,19 @@ export default {
       return '#f44336'
     },
 
+    formatTokens(count) {
+      if (!count) return '0'
+      if (count >= 1000000) return (count / 1000000).toFixed(1) + 'M'
+      if (count >= 1000) return (count / 1000).toFixed(1) + 'K'
+      return count.toString()
+    },
+
+    formatCost(krw) {
+      if (!krw) return '0'
+      if (krw >= 1000) return krw.toLocaleString('ko-KR', { maximumFractionDigits: 0 })
+      return krw.toFixed(1)
+    },
+
     viewDetail(attempt) {
       this.$router.push({
         path: '/convert',
@@ -316,7 +359,7 @@ export default {
 
 <style scoped>
 .history-view {
-  max-width: 1100px;
+  max-width: 1320px;
   margin: 0 auto;
 }
 
@@ -695,5 +738,51 @@ export default {
   font-weight: 600;
   display: inline-block;
   border: 1px solid #e2e8f0;
+}
+
+.token-cell { white-space: nowrap; }
+
+.token-info {
+  font-size: 12px;
+  color: #475569;
+  font-weight: 500;
+  font-family: 'Fira Code', monospace;
+}
+
+.token-na {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.cost-cell { white-space: nowrap; }
+
+.cost-badge {
+  background: #fef3c7;
+  color: #92400e;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-block;
+  border: 1px solid #fde68a;
+}
+
+.badge-cost {
+  background: #fef3c7;
+  color: #92400e;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid #fde68a;
+}
+
+.badge-token {
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
 }
 </style>

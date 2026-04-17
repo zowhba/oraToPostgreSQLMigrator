@@ -117,6 +117,43 @@ def init_tables():
     # 기존 테이블 마이그레이션
     cur.execute("ALTER TABLE query_conversions ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0")
 
+    # 토큰 사용량 컬럼 추가 (conversions)
+    cur.execute("ALTER TABLE conversions ADD COLUMN IF NOT EXISTS total_input_tokens INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE conversions ADD COLUMN IF NOT EXISTS total_output_tokens INTEGER DEFAULT 0")
+
+    # 토큰 사용량 컬럼 추가 (query_conversions)
+    cur.execute("ALTER TABLE query_conversions ADD COLUMN IF NOT EXISTS input_tokens INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE query_conversions ADD COLUMN IF NOT EXISTS output_tokens INTEGER DEFAULT 0")
+
+    # LLM 과금 정책 테이블
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS llm_pricing (
+            model_id       VARCHAR(100) PRIMARY KEY,
+            display_name   VARCHAR(200) NOT NULL,
+            input_price    FLOAT NOT NULL DEFAULT 0.0,
+            output_price   FLOAT NOT NULL DEFAULT 0.0,
+            currency       VARCHAR(10) NOT NULL DEFAULT 'USD',
+            price_unit     INTEGER NOT NULL DEFAULT 1000000,
+            updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 기본 과금 정책 삽입 (USD per 1M tokens, 2026년 기준, sort_order: 과금 작은 순)
+    cur.execute("ALTER TABLE llm_pricing ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0")
+    cur.execute("""
+        INSERT INTO llm_pricing (model_id, display_name, input_price, output_price, sort_order) VALUES
+            ('haiku-4.5', 'Claude 4.5 Haiku', 0.80, 4.00, 1),
+            ('gpt-5.2-chat', 'Azure ChatGPT 5.2', 2.50, 10.00, 2),
+            ('sonnet-4.5', 'Claude 4.5 Sonnet', 3.00, 15.00, 3),
+            ('opus-4.6', 'Claude 4.6 Opus', 15.00, 75.00, 4)
+        ON CONFLICT (model_id) DO NOTHING
+    """)
+    # 기존 데이터에 sort_order가 0인 경우 업데이트
+    cur.execute("UPDATE llm_pricing SET sort_order = 1 WHERE model_id = 'haiku-4.5' AND sort_order = 0")
+    cur.execute("UPDATE llm_pricing SET sort_order = 2 WHERE model_id = 'gpt-5.2-chat' AND sort_order = 0")
+    cur.execute("UPDATE llm_pricing SET sort_order = 3 WHERE model_id = 'sonnet-4.5' AND sort_order = 0")
+    cur.execute("UPDATE llm_pricing SET sort_order = 4 WHERE model_id = 'opus-4.6' AND sort_order = 0")
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS app_settings (
             setting_key   VARCHAR(100) PRIMARY KEY,

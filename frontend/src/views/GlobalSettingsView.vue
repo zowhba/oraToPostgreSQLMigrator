@@ -30,14 +30,66 @@
         </div>
       </div>
       <div class="form-group prompt-section">
-        <label>전역 기본 시스템 프롬프트</label>
-        <p class="field-desc">새 프로젝트 생성 시 기본으로 사용되는 AI 지침입니다.</p>
-        <textarea 
-          v-model="globalSystemPrompt" 
+        <label>
+          전역 기본 시스템 프롬프트
+          <span v-if="!isAdmin" class="readonly-badge">읽기 전용</span>
+        </label>
+        <p class="field-desc">새 프로젝트 생성 시 기본으로 사용되는 AI 지침입니다.{{ !isAdmin ? ' (편집은 Admin 모드에서만 가능)' : '' }}</p>
+        <textarea
+          v-model="globalSystemPrompt"
           placeholder="AI에게 전달할 기본 지침을 입력하세요..."
           rows="10"
           class="prompt-textarea"
+          :class="{ 'readonly-field': !isAdmin }"
+          :readonly="!isAdmin"
         ></textarea>
+      </div>
+
+      <!-- 과금 정책 관리 -->
+      <div class="form-group pricing-section">
+        <label>
+          모델별 과금 정책
+          <span v-if="!isAdmin" class="readonly-badge">읽기 전용</span>
+        </label>
+        <p class="field-desc">USD 기준 1M(백만) 토큰당 가격입니다. 비용 예측에 사용됩니다.{{ !isAdmin ? ' (편집은 Admin 모드에서만 가능)' : '' }}</p>
+        <div class="pricing-table-wrapper">
+          <table class="pricing-table">
+            <thead>
+              <tr>
+                <th>모델</th>
+                <th>입력 ($/1M tokens)</th>
+                <th>출력 ($/1M tokens)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in pricingList" :key="item.model_id">
+                <td class="pricing-model-name">{{ item.display_name }}</td>
+                <td>
+                  <input
+                    v-if="isAdmin"
+                    type="number"
+                    v-model.number="item.input_price"
+                    step="0.01"
+                    min="0"
+                    class="pricing-input"
+                  />
+                  <span v-else class="pricing-value">${{ item.input_price }}</span>
+                </td>
+                <td>
+                  <input
+                    v-if="isAdmin"
+                    type="number"
+                    v-model.number="item.output_price"
+                    step="0.01"
+                    min="0"
+                    class="pricing-input"
+                  />
+                  <span v-else class="pricing-value">${{ item.output_price }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="actions">
@@ -56,9 +108,11 @@ export default {
   name: 'GlobalSettingsView',
   data() {
     return {
+      isAdmin: false,
       activeModel: 'haiku-4.5',
       globalSystemPrompt: '',
       loading: false,
+      pricingList: [],
       enabledModelIds: ['gpt-5.2-chat', 'haiku-4.5', 'sonnet-4.5', 'opus-4.6'],
       models: [
         { id: 'gpt-5.2-chat', name: 'Azure ChatGPT 5.2', desc: '기본 모델 (빠르고 안정적)' },
@@ -106,14 +160,31 @@ export default {
     selectModel(modelId) {
       this.activeModel = modelId
     },
+    async fetchPricing() {
+      try {
+        const response = await axios.get('/api/settings/pricing')
+        if (response.data && response.data.pricing) {
+          this.pricingList = response.data.pricing
+        }
+      } catch (error) {
+        console.error('Failed to fetch pricing:', error)
+      }
+    },
     async saveSettings() {
       this.loading = true
       try {
         // 병렬 저장
-        await Promise.all([
-          axios.post('/api/settings', { key: 'active_model', value: this.activeModel }),
-          axios.post('/api/settings', { key: 'global_system_prompt', value: this.globalSystemPrompt })
-        ])
+        const promises = [
+          axios.post('/api/settings', { key: 'active_model', value: this.activeModel })
+        ]
+        // 프롬프트, 과금 정책은 Admin만 저장
+        if (this.isAdmin) {
+          promises.push(axios.post('/api/settings', { key: 'global_system_prompt', value: this.globalSystemPrompt }))
+          if (this.pricingList.length > 0) {
+            promises.push(axios.post('/api/settings/pricing', { pricing: this.pricingList }))
+          }
+        }
+        await Promise.all(promises)
         this.$emit('update-model')
         alert('모든 설정이 저장되었습니다.')
       } catch (error) {
@@ -125,8 +196,10 @@ export default {
     }
   },
   async mounted() {
+    this.isAdmin = sessionStorage.getItem('sql_migrator_admin_authed') === '1'
     await this.fetchSettings()
     await this.fetchEnabledModels()
+    await this.fetchPricing()
   }
 }
 </script>
@@ -280,5 +353,93 @@ export default {
   outline: none;
   border-color: #667eea;
   background: #fff;
+}
+
+/* 과금 정책 테이블 */
+.pricing-section {
+  margin-top: 10px;
+}
+
+.pricing-table-wrapper {
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.pricing-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.pricing-table th {
+  background: #f8fafc;
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.pricing-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 14px;
+}
+
+.pricing-table tr:last-child td {
+  border-bottom: none;
+}
+
+.pricing-model-name {
+  font-weight: 600;
+  color: #1e293b;
+  min-width: 180px;
+}
+
+.pricing-input {
+  width: 120px;
+  padding: 6px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: 'Fira Code', monospace;
+  text-align: right;
+  background: #fafafa;
+}
+
+.pricing-input:focus {
+  outline: none;
+  border-color: #667eea;
+  background: #fff;
+}
+
+.pricing-value {
+  font-family: 'Fira Code', monospace;
+  font-size: 14px;
+  color: #475569;
+}
+
+.readonly-badge {
+  display: inline-block;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.readonly-field {
+  background: #f1f5f9 !important;
+  color: #64748b !important;
+  cursor: default;
+}
+
+.readonly-field:focus {
+  border-color: #e0e0e0 !important;
+  background: #f1f5f9 !important;
 }
 </style>

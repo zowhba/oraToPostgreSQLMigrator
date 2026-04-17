@@ -174,6 +174,11 @@ def _call_claude(model: str, system_prompt: str, user_prompt: str) -> dict:
     stop_reason = result.get("stop_reason", "")
     content = result.get("content", [{}])[0].get("text", "")
 
+    # ── 토큰 사용량 추출 ──
+    usage = result.get("usage", {})
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+
     # ── 토큰 한도 초과 감지 ──
     if stop_reason == "max_tokens":
         raise ValueError(
@@ -189,21 +194,25 @@ def _call_claude(model: str, system_prompt: str, user_prompt: str) -> dict:
         # 1. 시도: 전체 내용에서 가장 바깥쪽 { } 찾기
         start_idx = content.find('{')
         end_idx = content.rfind('}')
-        
+
         if start_idx != -1 and end_idx != -1:
             json_str = content[start_idx:end_idx+1]
             try:
-                return json.loads(json_str)
+                parsed = json.loads(json_str)
+                parsed["_token_usage"] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+                return parsed
             except json.JSONDecodeError:
-                # 2. 시도: 만약 뒤에 다른 중괄호가 섞여서 실패하는 경우(Extra data 등),
-                # 앞에서부터 하나씩 잘라가며 첫 번째 유효한 JSON 객체 찾기
                 for i in range(end_idx, start_idx, -1):
                     try:
-                        return json.loads(content[start_idx:i+1])
+                        parsed = json.loads(content[start_idx:i+1])
+                        parsed["_token_usage"] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+                        return parsed
                     except json.JSONDecodeError:
                         continue
 
-        return json.loads(content)
+        parsed = json.loads(content)
+        parsed["_token_usage"] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        return parsed
     except json.JSONDecodeError as e:
         error_str = str(e).lower()
         logger.error(f"[Claude] JSON 파싱 실패: {e}. 원본 내용 일부: {content[:200]}...")
@@ -231,7 +240,9 @@ def convert_query(
     # Mock 모드
     if Config.LLM_MOCK_MODE:
         logger.info("[LLM] Mock 모드 — 테스트 응답 반환")
-        return _MOCK_RESPONSE.copy()
+        mock = _MOCK_RESPONSE.copy()
+        mock["_token_usage"] = {"input_tokens": 0, "output_tokens": 0}
+        return mock
 
     system_p = system_prompt or _build_system_prompt()
     user_p = _build_user_prompt(original_sql_xml, schema_context, tag_name)
@@ -322,6 +333,13 @@ def _call_azure_openai(system_prompt: str, user_prompt: str) -> dict:
     
     if resp.status_code != 200:
         raise Exception(f"Azure API Error {resp.status_code}: {resp.text}")
-        
-    content = resp.json()["choices"][0]["message"]["content"]
-    return json.loads(content)
+
+    resp_json = resp.json()
+    content = resp_json["choices"][0]["message"]["content"]
+    usage = resp_json.get("usage", {})
+    input_tokens = usage.get("prompt_tokens", 0)
+    output_tokens = usage.get("completion_tokens", 0)
+
+    parsed = json.loads(content)
+    parsed["_token_usage"] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+    return parsed

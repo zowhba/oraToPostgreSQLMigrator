@@ -27,8 +27,9 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
         cur.execute(
             """
             INSERT INTO conversions (
-                project_id, xml_file_name, total_queries, l1_count, l2_count, l3_count, duration_seconds, used_model
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                project_id, xml_file_name, total_queries, l1_count, l2_count, l3_count,
+                duration_seconds, used_model, total_input_tokens, total_output_tokens
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING conversion_id
             """,
             (
@@ -39,7 +40,9 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
                 l2_count,
                 l3_count,
                 response.duration_seconds,
-                response.used_model
+                response.used_model,
+                response.total_input_tokens,
+                response.total_output_tokens
             )
         )
         conversion_id = cur.fetchone()[0]
@@ -57,8 +60,9 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
                 INSERT INTO query_conversions (
                     conversion_id, query_id, tag_name, difficulty_level,
                     original_sql_xml, converted_sql, conversion_log,
-                    dry_run_success, dry_run_result, ai_guide_report, confidence_score
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    dry_run_success, dry_run_result, ai_guide_report, confidence_score,
+                    input_tokens, output_tokens
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     conversion_id,
@@ -71,7 +75,9 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
                     res.dry_run_result.is_success,
                     dry_run_json,
                     res.ai_guide_report,
-                    res.confidence_score
+                    res.confidence_score,
+                    res.input_tokens,
+                    res.output_tokens
                 )
             )
 
@@ -89,21 +95,27 @@ def get_history_hierarchy() -> List[Dict]:
         conn = database.get_connection()
         cur = conn.cursor(cursor_factory=database.RealDictCursor)
 
-        # 모든 변환 기록 조회 (프로젝트 정보 포함)
+        # 모든 변환 기록 조회 (프로젝트 정보 + 토큰/비용 포함)
         cur.execute("""
-            SELECT 
-                c.conversion_id, 
-                c.project_id, 
-                p.project_name, 
-                c.xml_file_name, 
-                c.total_queries, 
-                c.l1_count, c.l2_count, c.l3_count, 
-                c.duration_seconds, 
+            SELECT
+                c.conversion_id,
+                c.project_id,
+                p.project_name,
+                c.xml_file_name,
+                c.total_queries,
+                c.l1_count, c.l2_count, c.l3_count,
+                c.duration_seconds,
                 c.used_model,
                 c.created_at,
-                (SELECT COUNT(*) FROM query_conversions qc WHERE qc.conversion_id = c.conversion_id AND qc.dry_run_success = TRUE) as success_count
+                c.total_input_tokens,
+                c.total_output_tokens,
+                (SELECT COUNT(*) FROM query_conversions qc WHERE qc.conversion_id = c.conversion_id AND qc.dry_run_success = TRUE) as success_count,
+                lp.input_price,
+                lp.output_price,
+                lp.price_unit
             FROM conversions c
             LEFT JOIN projects p ON c.project_id = p.project_id
+            LEFT JOIN llm_pricing lp ON c.used_model = lp.model_id
             ORDER BY p.project_name, c.xml_file_name, c.created_at DESC
         """)
         rows = cur.fetchall()
@@ -130,6 +142,15 @@ def get_history_hierarchy() -> List[Dict]:
                     "attempts": []
                 }
 
+            # 비용 계산 (USD → KRW)
+            input_tokens = row.get('total_input_tokens') or 0
+            output_tokens = row.get('total_output_tokens') or 0
+            input_price = row.get('input_price') or 0
+            output_price = row.get('output_price') or 0
+            price_unit = row.get('price_unit') or 1000000
+            cost_usd = (input_tokens * input_price + output_tokens * output_price) / price_unit
+            cost_krw = round(cost_usd * 1450, 1)
+
             # 시도 정보 추가
             projects_dict[pid]["files"][fname]["attempts"].append({
                 "conversion_id": row['conversion_id'],
@@ -142,17 +163,30 @@ def get_history_hierarchy() -> List[Dict]:
                     "l1": row['l1_count'],
                     "l2": row['l2_count'],
                     "l3": row['l3_count']
-                }
+                },
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_krw": cost_krw
             })
 
-        # Dictionary를 UI용 Array로 변환
+        # Dictionary를 UI용 Array로 변환 + 프로젝트별 총 비용 계산
         result = []
         for pid, pdata in projects_dict.items():
             files_list = []
+            project_total_cost = 0
+            project_total_input_tokens = 0
+            project_total_output_tokens = 0
             for fname, fdata in pdata["files"].items():
+                for attempt in fdata["attempts"]:
+                    project_total_cost += attempt.get("cost_krw", 0)
+                    project_total_input_tokens += attempt.get("input_tokens", 0)
+                    project_total_output_tokens += attempt.get("output_tokens", 0)
                 files_list.append(fdata)
-            
+
             pdata["files"] = files_list
+            pdata["total_cost_krw"] = round(project_total_cost, 1)
+            pdata["total_input_tokens"] = project_total_input_tokens
+            pdata["total_output_tokens"] = project_total_output_tokens
             result.append(pdata)
 
         return result
@@ -169,19 +203,25 @@ def get_history_list() -> List[Dict]:
         cur = conn.cursor(cursor_factory=database.RealDictCursor)
 
         cur.execute("""
-            SELECT 
-                c.conversion_id, 
-                c.project_id, 
-                p.project_name, 
-                c.xml_file_name, 
-                c.total_queries, 
-                c.l1_count, c.l2_count, c.l3_count, 
-                c.duration_seconds, 
+            SELECT
+                c.conversion_id,
+                c.project_id,
+                p.project_name,
+                c.xml_file_name,
+                c.total_queries,
+                c.l1_count, c.l2_count, c.l3_count,
+                c.duration_seconds,
                 c.used_model,
                 c.created_at,
-                (SELECT COUNT(*) FROM query_conversions qc WHERE qc.conversion_id = c.conversion_id AND qc.dry_run_success = TRUE) as success_count
+                c.total_input_tokens,
+                c.total_output_tokens,
+                (SELECT COUNT(*) FROM query_conversions qc WHERE qc.conversion_id = c.conversion_id AND qc.dry_run_success = TRUE) as success_count,
+                lp.input_price,
+                lp.output_price,
+                lp.price_unit
             FROM conversions c
             LEFT JOIN projects p ON c.project_id = p.project_id
+            LEFT JOIN llm_pricing lp ON c.used_model = lp.model_id
             ORDER BY c.created_at DESC
         """)
         rows = cur.fetchall()
@@ -190,6 +230,14 @@ def get_history_list() -> List[Dict]:
         # 데이터 가공
         result = []
         for row in rows:
+            input_tokens = row.get('total_input_tokens') or 0
+            output_tokens = row.get('total_output_tokens') or 0
+            input_price = row.get('input_price') or 0
+            output_price = row.get('output_price') or 0
+            price_unit = row.get('price_unit') or 1000000
+            cost_usd = (input_tokens * input_price + output_tokens * output_price) / price_unit
+            cost_krw = round(cost_usd * 1450, 1)
+
             result.append({
                 "conversion_id": row['conversion_id'],
                 "project_id": row['project_id'],
@@ -204,7 +252,10 @@ def get_history_list() -> List[Dict]:
                     "l1": row['l1_count'],
                     "l2": row['l2_count'],
                     "l3": row['l3_count']
-                }
+                },
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_krw": cost_krw
             })
 
         return result

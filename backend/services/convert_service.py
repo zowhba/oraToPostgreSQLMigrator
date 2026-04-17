@@ -152,6 +152,9 @@ def stream_conversion(request: ConvertRequest):
             difficulty_assessment = llm_response.get("difficulty_assessment", {})
             ai_guide_report = llm_response.get("ai_guide_report", "")
             confidence_score = difficulty_assessment.get("confidence", 0.0)
+            token_usage = llm_response.get("_token_usage", {})
+            input_tokens = token_usage.get("input_tokens", 0)
+            output_tokens = token_usage.get("output_tokens", 0)
 
             conversion_log = [
                 ConversionLogEntry(
@@ -194,6 +197,8 @@ def stream_conversion(request: ConvertRequest):
                 dry_run_result=dry_run_result,
                 ai_guide_report=ai_guide_report,
                 confidence_score=confidence_score,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
 
         except Exception as e:
@@ -238,11 +243,16 @@ def stream_conversion(request: ConvertRequest):
     # 활성 모델 정보 가져오기
     active_model = llm_client._get_active_model()
 
+    total_input_tokens = sum(r.input_tokens for r in results)
+    total_output_tokens = sum(r.output_tokens for r in results)
+
     response = ConvertResponse(
         project_id=request.project_id,
         xml_file_name=request.xml_file_name,
         duration_seconds=duration,
         used_model=active_model,
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
         queries=results,
     )
     history_service.save_conversion_history(request, response)

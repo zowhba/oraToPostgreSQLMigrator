@@ -22,6 +22,15 @@ class AdminPasswordChange(BaseModel):
 class EnabledModels(BaseModel):
     models: List[str]
 
+class LlmPricingItem(BaseModel):
+    model_id: str
+    display_name: str
+    input_price: float
+    output_price: float
+
+class LlmPricingUpdate(BaseModel):
+    pricing: List[LlmPricingItem]
+
 
 def _get_setting(key: str, default: str = "") -> str:
     conn = app_db.get_connection()
@@ -147,4 +156,61 @@ async def change_admin_password(payload: AdminPasswordChange):
         raise
     except Exception as e:
         logger.error(f"Change admin password failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# LLM 과금 정책 관리 API
+# ─────────────────────────────────────────────
+
+@router.get("/pricing")
+async def get_pricing():
+    """LLM 모델별 과금 정책을 조회합니다."""
+    try:
+        conn = app_db.get_connection()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT model_id, display_name, input_price, output_price, currency, price_unit, updated_at
+                FROM llm_pricing ORDER BY sort_order, model_id
+            """)
+            rows = cur.fetchall()
+            return {
+                "status": "success",
+                "pricing": [
+                    {
+                        "model_id": r[0],
+                        "display_name": r[1],
+                        "input_price": r[2],
+                        "output_price": r[3],
+                        "currency": r[4],
+                        "price_unit": r[5],
+                        "updated_at": r[6].isoformat() if r[6] else None
+                    }
+                    for r in rows
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Failed to get pricing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/pricing")
+async def update_pricing(payload: LlmPricingUpdate):
+    """LLM 모델별 과금 정책을 일괄 업데이트합니다."""
+    try:
+        conn = app_db.get_connection()
+        with conn.cursor() as cur:
+            for item in payload.pricing:
+                cur.execute("""
+                    INSERT INTO llm_pricing (model_id, display_name, input_price, output_price, updated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (model_id) DO UPDATE
+                    SET display_name = EXCLUDED.display_name,
+                        input_price = EXCLUDED.input_price,
+                        output_price = EXCLUDED.output_price,
+                        updated_at = EXCLUDED.updated_at
+                """, (item.model_id, item.display_name, item.input_price, item.output_price))
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Failed to update pricing: {e}")
         raise HTTPException(status_code=500, detail=str(e))

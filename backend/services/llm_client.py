@@ -25,6 +25,34 @@ def _get_active_model() -> str:
     except Exception:
         return "gpt-5.2-chat"
 
+
+def _get_enabled_models() -> list[str]:
+    """Admin이 활성화한 LLM 모델 ID 목록을 DB에서 가져옵니다."""
+    default = ["gpt-5.2-chat", "haiku-4.5", "sonnet-4.5", "opus-4.6"]
+    try:
+        conn = app_db.get_connection()
+        with conn.cursor() as cur:
+            cur.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'enabled_models'")
+            row = cur.fetchone()
+            if row and row[0]:
+                parsed = json.loads(row[0])
+                if isinstance(parsed, list) and parsed:
+                    return parsed
+    except Exception:
+        pass
+    return default
+
+
+def _resolve_model(model_override: Optional[str]) -> str:
+    """요청별 override를 우선 사용하되, enabled_models에 없으면 전역 active_model로 폴백."""
+    enabled = _get_enabled_models()
+    if model_override and model_override in enabled:
+        return model_override
+    active = _get_active_model()
+    if active in enabled:
+        return active
+    return enabled[0] if enabled else "gpt-5.2-chat"
+
 # ── Mock 응답 (테스트용) ──
 _MOCK_RESPONSE = {
     "converted_sql": "-- MOCK: 변환된 SQL이 여기에 표시됩니다",
@@ -228,14 +256,15 @@ def convert_query(
     original_sql_xml: str,
     schema_context: str,
     tag_name: str,
-    system_prompt: Optional[str] = None
+    system_prompt: Optional[str] = None,
+    model_override: Optional[str] = None
 ) -> dict:
     """
     LLM을 호출하여 단일 쿼리를 변환합니다.
+    model_override가 지정되면 enabled_models 내 존재할 때 한해 해당 모델을 사용합니다.
     """
-    # 현재 활성 모델 확인
-    active_model = _get_active_model()
-    logger.info(f"[LLM] Active Model: {active_model}")
+    active_model = _resolve_model(model_override)
+    logger.info(f"[LLM] Active Model: {active_model} (override={model_override})")
 
     # Mock 모드
     if Config.LLM_MOCK_MODE:

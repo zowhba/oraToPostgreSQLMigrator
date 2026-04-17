@@ -144,7 +144,8 @@ def stream_conversion(request: ConvertRequest):
                 original_sql_xml=query.original_sql_xml,
                 schema_context=schema_context,
                 tag_name=query.tag_name,
-                system_prompt=effective_system_prompt
+                system_prompt=effective_system_prompt,
+                model_override=request.model_override,
             )
 
             converted_sql = llm_response.get("converted_sql", query.original_sql_xml)
@@ -240,8 +241,8 @@ def stream_conversion(request: ConvertRequest):
     end_time = time.time()
     duration = round(end_time - start_time, 2)
 
-    # 활성 모델 정보 가져오기
-    active_model = llm_client._get_active_model()
+    # 이번 변환에 실제 사용된 모델 (요청 override 우선, enabled_models 검증 포함)
+    active_model = llm_client._resolve_model(request.model_override)
 
     total_input_tokens = sum(r.input_tokens for r in results)
     total_output_tokens = sum(r.output_tokens for r in results)

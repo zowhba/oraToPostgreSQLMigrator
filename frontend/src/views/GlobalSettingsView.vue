@@ -12,13 +12,19 @@
       </div>
       
       <div class="form-group">
-        <label>활성 AI 모델</label>
-        <div class="model-selector">
+        <label>
+          기본 활성 AI 모델
+          <span v-if="!isAdmin" class="readonly-badge">읽기 전용</span>
+        </label>
+        <p class="field-desc">
+          전역 기본 모델입니다. 쿼리 변환 시 사용자는 이 모델을 기본값으로 사용하며, 매 요청마다 Admin이 활성화한 다른 모델로 변경할 수 있습니다.{{ !isAdmin ? ' (변경은 Admin 모드에서만 가능)' : '' }}
+        </p>
+        <div class="model-selector" :class="{ 'readonly-field': !isAdmin }">
           <div
             v-for="model in visibleModels"
             :key="model.id"
             class="model-option"
-            :class="{ active: activeModel === model.id }"
+            :class="{ active: activeModel === model.id, disabled: !isAdmin }"
             @click="selectModel(model.id)"
           >
             <div class="model-info">
@@ -92,7 +98,7 @@
         </div>
       </div>
 
-      <div class="actions">
+      <div class="actions" v-if="isAdmin">
         <button class="save-btn" @click="saveSettings" :disabled="loading">
           {{ loading ? '저장 중...' : '설정 저장' }}
         </button>
@@ -158,6 +164,7 @@ export default {
       }
     },
     selectModel(modelId) {
+      if (!this.isAdmin) return
       this.activeModel = modelId
     },
     async fetchPricing() {
@@ -171,18 +178,19 @@ export default {
       }
     },
     async saveSettings() {
+      if (!this.isAdmin) {
+        alert('전역 설정 저장은 Admin 모드에서만 가능합니다.')
+        return
+      }
       this.loading = true
       try {
-        // 병렬 저장
+        // Admin 전용: active_model, 시스템 프롬프트, 과금 정책 모두 저장
         const promises = [
-          axios.post('/api/settings', { key: 'active_model', value: this.activeModel })
+          axios.post('/api/settings', { key: 'active_model', value: this.activeModel }),
+          axios.post('/api/settings', { key: 'global_system_prompt', value: this.globalSystemPrompt })
         ]
-        // 프롬프트, 과금 정책은 Admin만 저장
-        if (this.isAdmin) {
-          promises.push(axios.post('/api/settings', { key: 'global_system_prompt', value: this.globalSystemPrompt }))
-          if (this.pricingList.length > 0) {
-            promises.push(axios.post('/api/settings/pricing', { pricing: this.pricingList }))
-          }
+        if (this.pricingList.length > 0) {
+          promises.push(axios.post('/api/settings/pricing', { pricing: this.pricingList }))
         }
         await Promise.all(promises)
         this.$emit('update-model')
@@ -278,6 +286,21 @@ export default {
   border-color: #667eea;
   background: #f0f4ff;
   border-width: 2px;
+}
+
+.model-option.disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.model-option.disabled:hover {
+  border-color: #e0e0e0;
+  background: white;
+}
+
+.model-option.disabled.active:hover {
+  border-color: #667eea;
+  background: #f0f4ff;
 }
 
 .model-info {

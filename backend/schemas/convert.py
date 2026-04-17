@@ -40,6 +40,7 @@ class ConvertRequest(BaseModel):
     )
     queries: list[QueryUnit]
     system_prompt_override: Optional[str] = Field(None, description="해당 세션에만 적용할 1회성 시스템 프롬프트")
+    model_override: Optional[str] = Field(None, description="해당 요청에만 적용할 1회성 LLM 모델 (전역 active_model 무시)")
 
 
 # ────────────────────────────────────────────

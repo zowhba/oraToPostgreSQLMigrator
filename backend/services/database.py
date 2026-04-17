@@ -16,7 +16,7 @@ _conn = None
 def get_connection():
     """앱 DB 커넥션을 반환합니다 (lazy singleton)."""
     global _conn
-    
+
     # 기존 커넥션이 있다면 상태 체크 (재사용 전 검증)
     if _conn is not None and not _conn.closed:
         try:
@@ -24,7 +24,7 @@ def get_connection():
                 tmp_cur.execute("SELECT 1")
         except Exception:
             _conn = None  # 연결 유실됨 (재설정 유도)
-            
+
     if _conn is None or _conn.closed:
         if Config.APP_DB_URL:
             _conn = psycopg2.connect(Config.APP_DB_URL, connect_timeout=10, sslmode='require')
@@ -44,11 +44,11 @@ def get_connection():
                 Config.APP_DB_HOST, Config.APP_DB_PORT, Config.APP_DB_NAME,
             )
         _conn.autocommit = True
-        
+
         # 스키마 검색 경로 설정 (public이 누락되지 않도록 강제)
         with _conn.cursor() as cur:
             cur.execute("SET search_path TO public, hanarocms, edmp")
-            
+
     return _conn
 
 

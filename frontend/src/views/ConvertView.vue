@@ -17,20 +17,38 @@
       />
     </div>
 
+    <!-- 변환 설정 (모델 선택) -->
+    <div class="section-card model-picker-section" v-if="queries.length > 0 && results.length === 0 && !loading">
+      <div class="model-picker-header">
+        <h3 class="section-title">
+          <span class="icon">🤖</span> 사용할 AI 모델
+          <span class="optional-label">(기본값: 전역 설정 모델 · Admin이 활성화한 모델 중 선택)</span>
+        </h3>
+      </div>
+      <div class="model-picker-body">
+        <select v-model="selectedModel" class="form-input model-select" :disabled="availableModels.length === 0">
+          <option v-for="m in availableModels" :key="m.id" :value="m.id">
+            {{ m.name }}{{ m.id === defaultModel ? ' (기본값)' : '' }}
+          </option>
+        </select>
+        <p class="hint-text">선택한 모델은 이번 변환에만 적용되며 전역 기본값은 변경되지 않습니다.</p>
+      </div>
+    </div>
+
     <!-- 변환 설정 (프롬프트 편집) -->
     <div class="section-card prompt-override-section" v-if="queries.length > 0 && results.length === 0 && !loading">
       <div class="section-header" @click="showPromptEditor = !showPromptEditor">
         <h3 class="section-title">
-          <span class="icon">⚙️</span> 변환 프롬프트 설정 
+          <span class="icon">⚙️</span> 변환 프롬프트 설정
           <span class="optional-label">(프로젝트 설정을 기반으로 하며, 이번 1회 변환에만 적용됩니다)</span>
         </h3>
         <span class="toggle-icon">{{ showPromptEditor ? '▲' : '▼' }}</span>
       </div>
-      
+
       <div v-if="showPromptEditor" class="prompt-editor-body">
-        <textarea 
-          v-model="oneTimePrompt" 
-          class="form-input prompt-textarea" 
+        <textarea
+          v-model="oneTimePrompt"
+          class="form-input prompt-textarea"
           placeholder="이 프로젝트의 기본 지침을 기반으로 이번 변환에만 적용할 내용을 수정하세요. 비워두면 프로젝트 설정값이 사용됩니다."
           rows="5"
         ></textarea>
@@ -111,7 +129,7 @@
 import FileUpload from '../components/convert/FileUpload.vue'
 import QueryTable from '../components/convert/QueryTable.vue'
 import QueryDetail from '../components/convert/QueryDetail.vue'
-import { convertQueriesStream, getHistoryDetail, getSettings } from '../api/index.js'
+import { convertQueriesStream, getHistoryDetail, getSettings, getEnabledModels } from '../api/index.js'
 import * as XLSX from 'xlsx'
 
 export default {
@@ -141,11 +159,26 @@ export default {
       usedModel: '',
       showPromptEditor: false,
       oneTimePrompt: '',
-      globalPrompt: ''
+      globalPrompt: '',
+      defaultModel: '',
+      selectedModel: '',
+      enabledModelIds: [],
+      modelCatalog: [
+        { id: 'gpt-5.2-chat', name: 'Azure ChatGPT 5.2' },
+        { id: 'haiku-4.5', name: 'Claude 4.5 Haiku' },
+        { id: 'sonnet-4.5', name: 'Claude 4.5 Sonnet' },
+        { id: 'opus-4.6', name: 'Claude 4.6 Opus' }
+      ]
     }
   },
-  mounted() {
-    this.fetchGlobalPrompt()
+  computed: {
+    availableModels() {
+      return this.modelCatalog.filter(m => this.enabledModelIds.includes(m.id))
+    }
+  },
+  async mounted() {
+    await this.fetchGlobalPrompt()
+    await this.fetchModelOptions()
     this.checkHistoryParam()
   },
   methods: {
@@ -176,8 +209,29 @@ export default {
         if (settings && settings.global_system_prompt) {
           this.globalPrompt = settings.global_system_prompt
         }
+        if (settings && settings.active_model) {
+          this.defaultModel = settings.active_model
+        }
       } catch (error) {
         console.error('Failed to fetch global prompt:', error)
+      }
+    },
+
+    async fetchModelOptions() {
+      try {
+        const res = await getEnabledModels()
+        if (res && Array.isArray(res.models)) {
+          this.enabledModelIds = res.models
+        }
+      } catch (error) {
+        console.error('Failed to fetch enabled models:', error)
+        this.enabledModelIds = ['gpt-5.2-chat', 'haiku-4.5', 'sonnet-4.5', 'opus-4.6']
+      }
+      // 기본 선택값: 전역 active_model이 활성 목록에 있으면 그걸, 아니면 첫 번째
+      if (this.enabledModelIds.includes(this.defaultModel)) {
+        this.selectedModel = this.defaultModel
+      } else if (this.enabledModelIds.length > 0) {
+        this.selectedModel = this.enabledModelIds[0]
       }
     },
 
@@ -221,7 +275,8 @@ export default {
           mapper_namespace: this.namespace,
           file_created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
           queries: this.queries,
-          system_prompt_override: this.oneTimePrompt
+          system_prompt_override: this.oneTimePrompt,
+          model_override: this.selectedModel || null
         }
 
         // 스트리밍 호출
@@ -603,6 +658,38 @@ export default {
 
 .model-info-badge strong {
   color: #4f46e5;
+}
+
+/* ─── 모델 선택 UI ─── */
+.model-picker-section {
+  padding: 16px 24px !important;
+}
+
+.model-picker-header .section-title {
+  margin-bottom: 0;
+  font-size: 15px;
+}
+
+.model-picker-body {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.model-select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fdfdfd;
+  cursor: pointer;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #667eea;
+  background: #fff;
 }
 
 /* ─── 프롬프트 오버라이드 UI ─── */

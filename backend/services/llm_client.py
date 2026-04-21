@@ -4,6 +4,7 @@ Azure OpenAI GPT-5.0 LLM 클라이언트
 """
 import json
 import logging
+import re
 import time
 from typing import Optional
 
@@ -291,7 +292,13 @@ def convert_query(
                     raise KeyError(f"LLM 응답에 '{key}' 키 누락")
 
             if parsed.get("converted_sql"):
-                parsed["converted_sql"] = parsed["converted_sql"].replace("&quot;", "'").replace("&apos;", "'")
+                sql = parsed["converted_sql"]
+                sql = sql.replace("&quot;", "'").replace("&apos;", "'")
+                # 일부 모델이 converted_sql에 <?xml ...?> + <mapper> 래퍼를 포함하는 경우 제거
+                sql = re.sub(r'<\?xml[^?]*\?>\s*', '', sql)
+                sql = re.sub(r'<mapper[^>]*>\s*', '', sql)
+                sql = re.sub(r'\s*</mapper>\s*$', '', sql.rstrip())
+                parsed["converted_sql"] = sql.strip()
             
             return parsed
 

@@ -293,11 +293,14 @@ export default {
 
     formatDate(isoString) {
       const date = new Date(isoString)
-      const mm = String(date.getMonth() + 1).padStart(2, '0')
-      const dd = String(date.getDate()).padStart(2, '0')
-      const hh = String(date.getHours()).padStart(2, '0')
-      const mi = String(date.getMinutes()).padStart(2, '0')
-      return `${mm}/${dd} ${hh}:${mi}`
+      return new Intl.DateTimeFormat('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).format(date).replace(/\. /g, '/').replace('.', '')
     },
 
     calculateAccuracy(attempt) {

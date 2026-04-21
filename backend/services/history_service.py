@@ -154,7 +154,7 @@ def get_history_hierarchy() -> List[Dict]:
             # 시도 정보 추가
             projects_dict[pid]["files"][fname]["attempts"].append({
                 "conversion_id": row['conversion_id'],
-                "timestamp": row['created_at'].isoformat(),
+                "timestamp": row['created_at'].isoformat() + 'Z',
                 "total": row['total_queries'],
                 "success": row['success_count'],
                 "duration": row['duration_seconds'],
@@ -243,7 +243,7 @@ def get_history_list() -> List[Dict]:
                 "project_id": row['project_id'],
                 "project_name": row['project_name'] or "알 수 없는 프로젝트",
                 "file_name": row['xml_file_name'] or "unknown.xml",
-                "timestamp": row['created_at'].isoformat(),
+                "timestamp": row['created_at'].isoformat() + 'Z',
                 "total": row['total_queries'],
                 "success": row['success_count'],
                 "duration": row['duration_seconds'],

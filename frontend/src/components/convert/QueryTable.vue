@@ -72,7 +72,10 @@ export default {
 
 <style scoped>
 .query-table-wrapper {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 420px;
+  border: 1px solid #eee;
+  border-radius: 8px;
 }
 
 .query-table {
@@ -88,10 +91,13 @@ export default {
   color: #555;
   font-weight: 600;
   border-bottom: 2px solid #ddd;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .query-table td {
-  padding: 12px;
+  padding: 10px 12px;
   border-bottom: 1px solid #eee;
   vertical-align: middle;
 }

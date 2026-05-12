@@ -17,10 +17,12 @@
       />
 
       <div class="upload-icon">&#128194;</div>
-      <p class="upload-text">
-        XML 또는 엑셀 파일을 드래그하거나 클릭하여 선택하세요
-      </p>
-      <p class="upload-hint">MyBatis XML (.xml) 또는 엑셀 (.xlsx, .xls)</p>
+      <div class="upload-text-group">
+        <p class="upload-text">
+          XML 또는 엑셀 파일을 드래그하거나 클릭하여 선택하세요
+        </p>
+        <p class="upload-hint">MyBatis XML (.xml) 또는 엑셀 (.xlsx, .xls)</p>
+      </div>
     </div>
 
     <!-- 선택된 파일 정보 -->
@@ -130,12 +132,14 @@ export default {
 
 .upload-area {
   border: 2px dashed #ccc;
-  border-radius: 12px;
-  padding: 40px;
-  text-align: center;
+  border-radius: 10px;
+  padding: 12px 16px;
   cursor: pointer;
   transition: all 0.2s;
   background: #fafafa;
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 
 .upload-area:hover {
@@ -154,38 +158,46 @@ export default {
 }
 
 .upload-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.upload-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .upload-text {
-  font-size: 16px;
+  font-size: 13px;
   color: #333;
-  margin-bottom: 8px;
+  margin: 0;
 }
 
 .upload-hint {
-  font-size: 14px;
+  font-size: 11px;
   color: #888;
+  margin: 0;
 }
 
 .file-info {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: 8px 12px;
   background: #e8f5e9;
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .file-name {
-  font-size: 14px;
+  font-size: 13px;
   color: #2e7d32;
   font-weight: 500;
 }
 
 .btn-remove {
-  padding: 4px 12px;
+  padding: 3px 10px;
   background: #ffebee;
   color: #c62828;
   border: none;

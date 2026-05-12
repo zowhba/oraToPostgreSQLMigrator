@@ -98,6 +98,7 @@
                         <span class="bar-text">{{ attempt.success }}/{{ attempt.total }}</span>
                       </div>
                     </td>
+                    <td class="attempt-duration">{{ attempt.duration }}초</td>
                     <td><span class="model-badge">{{ attempt.used_model || '-' }}</span></td>
                     <td class="token-cell">
                       <span v-if="attempt.input_tokens || attempt.output_tokens" class="token-info">
@@ -109,7 +110,6 @@
                       <span v-if="attempt.cost_krw > 0" class="cost-badge">₩{{ formatCost(attempt.cost_krw) }}</span>
                       <span v-else class="token-na">-</span>
                     </td>
-                    <td class="attempt-duration">{{ attempt.duration }}초</td>
                     <td>
                       <div class="level-mini-badges">
                         <span class="m-badge m-success" title="Lv.1">{{ attempt.levels.l1 }}</span>

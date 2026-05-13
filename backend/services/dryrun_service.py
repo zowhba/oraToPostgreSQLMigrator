@@ -140,6 +140,49 @@ def _inject_where_if_missing(sql: str) -> str:
     return sql
 
 
+def _expand_trim_markers(text: str, trim_meta: list) -> str:
+    """
+    `MBTRIMOPEN{idx}MBTRIMEND ... MBTRIMCLOSE{idx}MBTRIMEND` 형태로 잠시 표시해 둔
+    <trim> 범위를 실제 SQL 로 확장한다.
+
+    - prefixOverrides: 본문 시작의 첫 매칭 토큰을 1회 제거 (MyBatis 동작과 동일)
+    - suffixOverrides: 본문 끝의 첫 매칭 토큰을 1회 제거
+    - 그 뒤 prefix / suffix 를 양끝에 부착
+    """
+    if not trim_meta:
+        return text
+
+    for idx, meta in enumerate(trim_meta):
+        start = f"MBTRIMOPEN{idx}MBTRIMEND"
+        end = f"MBTRIMCLOSE{idx}MBTRIMEND"
+        pattern = re.escape(start) + r"\s*(.*?)\s*" + re.escape(end)
+
+        def _expand(m, meta=meta):
+            inner = re.sub(r"\s+", " ", m.group(1)).strip()
+
+            # prefixOverrides — 앞쪽에서 첫 매칭 토큰 1회 제거 (대소문자 무시)
+            for tok in meta["prefix_overrides"]:
+                em = re.match(re.escape(tok), inner, flags=re.IGNORECASE)
+                if em:
+                    inner = inner[em.end():].lstrip()
+                    break
+
+            # suffixOverrides — 뒤쪽에서 첫 매칭 토큰 1회 제거 (대소문자 무시)
+            for tok in meta["suffix_overrides"]:
+                em = re.search(re.escape(tok) + r"\s*$", inner, flags=re.IGNORECASE)
+                if em:
+                    inner = inner[:em.start()].rstrip()
+                    break
+
+            return f" {meta['prefix']} {inner} {meta['suffix']} "
+
+        text = re.sub(pattern, _expand, text, flags=re.IGNORECASE | re.DOTALL)
+
+    # 마커 확장 후 prefix/suffix 사이에 생긴 중복 공백 정리
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def _strip_mybatis_tags(sql_xml: str) -> str:
     """
     MyBatis 동적 태그를 제거하고 Dry-run 가능한 순수 SQL을 추출합니다.
@@ -148,13 +191,15 @@ def _strip_mybatis_tags(sql_xml: str) -> str:
     1. SQL 비교 연산자(<=, >=, <>) 보호 (XML 태그로 오인 방지)
     2. <include>, <selectKey> 제거
     3. <choose> → 첫 번째 <when> 브랜치만 선택
-    4. <where>/<set>/<trim> → SQL 키워드로 치환
+    4. <where>/<set> → SQL 키워드로 치환, <trim>은 마커로 치환 (prefix/suffix/Overrides 보존)
     5. 나머지 XML 태그 제거 (내부 텍스트 보존)
-    6. SQL 연산자 복원
-    7. WHERE 절 자동 주입 (<where> 없는 경우)
-    8. WHERE 뒤 AND/OR 리딩 제거 (MyBatis <where> 동작 모방)
+    6. SQL 연산자 복원, 주석 제거, 공백 정리
+    7. <trim> 마커 확장 — prefixOverrides/suffixOverrides 토큰 strip 후 prefix/suffix 부착
+    8. WHERE 절 자동 주입 (<where> 없는 경우)
+    9. WHERE 뒤 AND/OR 리딩 제거 (MyBatis <where> 동작 모방)
     """
     text = sql_xml
+    trim_meta: list[dict] = []  # <trim> 메타데이터 — 마커 확장 시 사용
 
     # 0. <![CDATA[...]]> 언래핑 — 내부 SQL 텍스트만 추출
     #    <![CDATA[...]]> 는 일반 XML 태그 패턴(<tag>)에 매칭되지 않으므로 반드시 먼저 처리해야 함
@@ -185,20 +230,33 @@ def _strip_mybatis_tags(sql_xml: str) -> str:
     text = re.sub(r"<set\s*/?>", " SET ", text, flags=re.IGNORECASE)
     text = re.sub(r"</set\s*>", " ", text, flags=re.IGNORECASE)
 
-    # <trim> 태그 처리 (prefix, suffix 속성 추출)
+    # <trim> 태그 처리 — prefix / suffix / prefixOverrides / suffixOverrides 모두 보존
+    #
+    # 단순히 prefix/body/suffix 를 즉시 조립하면 body 안의 <if>/<foreach>/주석을 정리하기 전이라
+    # suffixOverrides 의 꼬리 토큰(예: ",") 탐지가 부정확합니다. 그래서 일단 마커로 감싸두고,
+    # 본문이 평탄해진 뒤(아래 7단계)에 prefix/suffix 부착 및 overrides 토큰 strip 을 수행합니다.
     def _replace_trim(m):
         attrs = m.group(1)
         body = m.group(2)
-        
-        # prefix 추출 (공백, 특수문자 포함 가능하므로 [^"']+ 패턴 사용)
-        prefix_match = re.search(r'prefix\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
-        prefix = prefix_match.group(1) if prefix_match else ""
-        
-        # suffix 추출
-        suffix_match = re.search(r'suffix\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
-        suffix = suffix_match.group(1) if suffix_match else ""
-        
-        return f" {prefix} {body} {suffix} "
+
+        def _get_attr(name: str) -> str:
+            am = re.search(rf'{name}\s*=\s*["\']([^"\']*)["\']', attrs, re.IGNORECASE)
+            return am.group(1) if am else ""
+
+        def _split_overrides(raw: str) -> list:
+            # MyBatis 는 '|' 로 구분, 각 토큰의 양끝 공백은 의미가 있을 수 있으나
+            # 마커 확장 시 좌우 공백 처리를 별도로 하므로 strip 해서 보관.
+            return [tok.strip() for tok in raw.split("|") if tok.strip()]
+
+        idx = len(trim_meta)
+        trim_meta.append({
+            "prefix": _get_attr("prefix"),
+            "suffix": _get_attr("suffix"),
+            "prefix_overrides": _split_overrides(_get_attr("prefixOverrides")),
+            "suffix_overrides": _split_overrides(_get_attr("suffixOverrides")),
+        })
+        # 마커는 반드시 알파벳으로 시작 — 뒤의 leading non-alpha cleanup 에 의해 소실 방지.
+        return f" MBTRIMOPEN{idx}MBTRIMEND {body} MBTRIMCLOSE{idx}MBTRIMEND "
 
     text = re.sub(r"<trim\s+([^>]*?)>(.*?)</trim\s*>", _replace_trim, text, flags=re.IGNORECASE | re.DOTALL)
 
@@ -241,11 +299,14 @@ def _strip_mybatis_tags(sql_xml: str) -> str:
 
     # 연속 공백/줄바꿈 정리 (중요: 앞뒤 공백 완전 제거)
     text = re.sub(r"\s+", " ", text).strip()
-    
+
+    # 7. <trim> 마커 확장 — body 가 평탄해진 시점에 prefix/suffix 부착 및 overrides strip 수행
+    text = _expand_trim_markers(text, trim_meta)
+
     # 불필요한 특수문자 찌꺼기(<! 등)가 앞에 남은 경우 제거
     text = re.sub(r'^[^a-zA-Z]+', '', text)
 
-    # 7. <where> 없는 경우 WHERE 자동 주입
+    # 8. <where> 없는 경우 WHERE 자동 주입
     text = _inject_where_if_missing(text)
 
     # 8. WHERE 바로 뒤 AND/OR 제거 (MyBatis <where> 동작 모방)

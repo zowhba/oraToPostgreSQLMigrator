@@ -133,7 +133,14 @@ def _build_user_prompt(original_sql_xml: str, schema_context: str, tag_name: str
     - PostgreSQL은 타입 비교에 매우 엄격합니다. 숫자(NUMBER)와 문자열(VARCHAR)을 비교할 경우 반드시 명시적 캐스팅을 추가하세요. (예: `col_int::text = '1'`, `col_text = 1::text`, `1::text IN (UPPER(...))` 등)
     - `IN` 절 내의 리터럴과 컬럼 타입을 반드시 일치시키거나 캐스팅을 추가하세요.
     - `col = NULL`은 항상 `col IS NULL`로 변환하고, `col != NULL`은 `col IS NOT NULL`로 변환하십시오.
-10. ★ 기타 주의사항:
+10. ★ FROM 절 JOIN 스코프 (PostgreSQL은 표준을 엄격히 적용):
+    - Oracle 스타일 콤마조인과 ANSI JOIN의 혼용은 PostgreSQL에서 항상 에러("invalid reference to FROM-clause entry")를 유발합니다. 표준상 JOIN이 콤마보다 강하게 결합되어, `LEFT/RIGHT/INNER JOIN ... ON ...`의 ON 절에서 콤마 쪽 별칭을 참조할 수 없기 때문입니다.
+    - 반드시 FROM 절 전체를 명시적 JOIN 체인으로 재작성하십시오. 콤마 조인은 남기지 마십시오.
+      변환 예:
+        Oracle: FROM t1 a, t2 b LEFT JOIN t3 c ON a.id = c.id WHERE a.x = b.y
+        →  PG: FROM t1 a JOIN t2 b ON a.x = b.y LEFT JOIN t3 c ON a.id = c.id
+    - LEFT/RIGHT OUTER JOIN으로 변환한 경우, 같은 외부조인 대상 테이블의 동치 조건이 WHERE 절에 다시 등장하면 외부조인이 사실상 INNER JOIN으로 동작하므로 WHERE 쪽 중복 조건은 제거하십시오. (단, `IS NULL` 류의 anti-join 조건은 보존)
+11. ★ 기타 주의사항:
    - 절대로 쿼리 내용을 생략하거나 말줄임표(...)를 사용하지 마십시오. 전체 SQL을 처음부터 끝까지 완전하게 작성하십시오.
 
 

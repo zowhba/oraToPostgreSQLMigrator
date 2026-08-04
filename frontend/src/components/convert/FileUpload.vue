@@ -11,7 +11,7 @@
       <input
         type="file"
         ref="fileInput"
-        accept=".xml,.xlsx,.xls"
+        accept=".xml,.xlsx,.xls,.sql"
         @change="handleFileSelect"
         hidden
       />
@@ -19,9 +19,11 @@
       <div class="upload-icon">&#128194;</div>
       <div class="upload-text-group">
         <p class="upload-text">
-          XML 또는 엑셀 파일을 드래그하거나 클릭하여 선택하세요
+          XML · 엑셀 · SQL 파일을 드래그하거나 클릭하여 선택하세요
         </p>
-        <p class="upload-hint">MyBatis XML (.xml) 또는 엑셀 (.xlsx, .xls)</p>
+        <p class="upload-hint">
+          MyBatis XML (.xml) · 엑셀 (.xlsx, .xls) · SQL 스크립트 (.sql)
+        </p>
       </div>
     </div>
 
@@ -30,12 +32,22 @@
       <span class="file-name">{{ fileName }}</span>
       <button class="btn-remove" @click="clearFile">삭제</button>
     </div>
+
+    <!-- .sql 소스 안내 -->
+    <div class="sql-notice" v-if="sourceType === 'sql'">
+      <span class="notice-icon">ℹ️</span>
+      <span>
+        SQL 스크립트는 <strong>Dry-run(EXPLAIN) 검증을 수행하지 않습니다.</strong>
+        프로젝트에 설정된 대상 DB의 스키마는 변환 참고용으로만 사용됩니다.
+      </span>
+    </div>
   </div>
 </template>
 
 <script>
 import { parseMyBatisXml } from '../../utils/xmlParser.js'
 import { parseExcelQueries } from '../../utils/excelParser.js'
+import { parseSqlScript } from '../../utils/sqlParser.js'
 
 export default {
   name: 'FileUpload',
@@ -49,7 +61,8 @@ export default {
   data() {
     return {
       isDragging: false,
-      fileName: ''
+      fileName: '',
+      sourceType: ''
     }
   },
   methods: {
@@ -76,26 +89,44 @@ export default {
       }
     },
 
-    async processFile(file) {
-      const isXml = file.name.endsWith('.xml')
-      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
+    /**
+     * 파일 확장자로 소스 종류를 판별합니다.
+     * @returns {'xml'|'excel'|'sql'|''}
+     */
+    detectSourceType(fileName) {
+      const name = fileName.toLowerCase()
+      if (name.endsWith('.xml')) return 'xml'
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) return 'excel'
+      if (name.endsWith('.sql')) return 'sql'
+      return ''
+    },
 
-      if (!isXml && !isExcel) {
-        alert('XML 또는 엑셀 파일만 업로드 가능합니다.')
+    async processFile(file) {
+      const sourceType = this.detectSourceType(file.name)
+
+      if (!sourceType) {
+        alert('XML(.xml), 엑셀(.xlsx, .xls), SQL(.sql) 파일만 업로드 가능합니다.')
         return
       }
 
       this.fileName = file.name
+      this.sourceType = sourceType
 
       try {
         let namespace = ''
         let queries = []
 
-        if (isXml) {
+        if (sourceType === 'xml') {
           const content = await file.text()
           const parsed = parseMyBatisXml(content)
           namespace = parsed.namespace
           queries = parsed.queries
+        } else if (sourceType === 'sql') {
+          const content = await file.text()
+          const parsed = parseSqlScript(content)
+          queries = parsed.queries
+          // .sql은 네임스페이스가 없으므로 파일명으로 대체
+          namespace = file.name.split('.').slice(0, -1).join('.')
         } else {
           const parsed = await parseExcelQueries(file)
           queries = parsed.queries
@@ -106,6 +137,7 @@ export default {
         this.$emit('file-parsed', {
           fileName: file.name,
           namespace,
+          sourceType,
           queries
         })
       } catch (error) {
@@ -116,8 +148,14 @@ export default {
 
     clearFile() {
       this.fileName = ''
+      this.sourceType = ''
       this.$refs.fileInput.value = ''
-      this.$emit('file-parsed', { fileName: '', namespace: '', queries: [] })
+      this.$emit('file-parsed', {
+        fileName: '',
+        namespace: '',
+        sourceType: '',
+        queries: []
+      })
     }
   }
 }
@@ -208,5 +246,26 @@ export default {
 
 .btn-remove:hover {
   background: #ffcdd2;
+}
+
+.sql-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #eef4ff;
+  border: 1px solid #c7d8ff;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #33478a;
+  line-height: 1.6;
+}
+
+.sql-notice .notice-icon {
+  flex-shrink: 0;
+}
+
+.sql-notice strong {
+  color: #1e3a8a;
 }
 </style>

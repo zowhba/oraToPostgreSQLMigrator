@@ -71,6 +71,33 @@ _MOCK_RESPONSE = {
 }
 
 
+# .sql 스크립트 소스에서 전역/프로젝트 시스템 프롬프트에 덧붙이는 보정 지침
+_SQL_SCRIPT_SYSTEM_SUFFIX = (
+    "[.sql 스크립트 모드]\n"
+    "이번 입력은 MyBatis XML이 아니라 Oracle 프로시저·함수·패키지 등이 담긴 순수 SQL 스크립트입니다.\n"
+    "- converted_sql에는 XML 태그나 마크다운 코드펜스(```)를 절대 포함하지 마십시오. 실행 가능한 PostgreSQL 스크립트 원문만 담으십시오.\n"
+    "- PL/SQL 블록은 PL/pgSQL(`LANGUAGE plpgsql AS $$ ... $$`)로 변환하십시오.\n"
+    "- 이 모드에서는 Dry-run(EXPLAIN) 검증이 수행되지 않습니다. 따라서 변환 확신도와 미변환 항목을 특히 보수적이고 정확하게 판정하십시오.\n"
+    "- PostgreSQL에 대응 기능이 없는 요소(자율 트랜잭션, 패키지, 로컬 서브프로그램 등)는 임의로 삭제하지 말고 "
+    "원본을 주석으로 남긴 뒤 unconverted_items에 반드시 포함하십시오."
+)
+
+# 응답에 혼입되는 마크다운 코드펜스 제거용
+_CODE_FENCE_PATTERN = re.compile(
+    r"^\s*```[a-zA-Z]*\s*\n(?P<body>.*?)\n?\s*```\s*$", re.DOTALL
+)
+
+
+def _strip_code_fence(text: str) -> str:
+    """converted_sql에 마크다운 코드펜스(```sql ... ```)가 혼입된 경우 제거합니다."""
+    if not text:
+        return text
+    match = _CODE_FENCE_PATTERN.match(text)
+    if match:
+        return match.group("body")
+    return text
+
+
 def _build_system_prompt() -> str:
     """DB에서 전역 기본 시스템 프롬프트를 가져옵니다."""
     try:
@@ -93,6 +120,95 @@ def _build_system_prompt() -> str:
         "★ 중요: 절대로 쿼리 내용을 생략하거나 말줄임표(...)를 사용하지 마십시오. "
         "전체 SQL을 처음부터 끝까지 완전하게 작성하십시오."
     )
+
+
+def _build_sql_script_user_prompt(
+    original_sql: str, schema_context: str, tag_name: str
+) -> str:
+    """
+    .sql 스크립트(프로시저/함수/패키지 등) 전용 사용자 프롬프트.
+    MyBatis 동적 태그 규칙 대신 PL/SQL → PL/pgSQL 변환 규칙을 사용합니다.
+    """
+    return f"""## 대상 DB의 테이블 스키마 (참고용):
+{schema_context if schema_context else "(스키마 정보 없음)"}
+
+## 원본 Oracle SQL 스크립트 (오브젝트 종류: {tag_name}):
+```sql
+{original_sql}
+```
+
+## 변환 규칙:
+1. ★ 출력은 XML이 아니라 **순수 PostgreSQL 스크립트**입니다. MyBatis 태그(<select>, <if> 등)를 절대 추가하지 마십시오.
+2. 오브젝트 정의 변환:
+   - `CREATE OR REPLACE PROCEDURE x IS ... END x; /`
+     → `CREATE OR REPLACE PROCEDURE x(...) LANGUAGE plpgsql AS $$ DECLARE ... BEGIN ... END; $$;`
+   - Oracle FUNCTION → PostgreSQL FUNCTION (`RETURNS <type> LANGUAGE plpgsql`)
+   - `PACKAGE` / `PACKAGE BODY` → PostgreSQL에는 대응 개념이 없습니다. 스키마 + 개별 함수 집합으로 분해하고,
+     패키지 전역 변수는 커스텀 GUC(`set_config`/`current_setting`) 또는 임시 테이블로 대체 방안을 제시하십시오.
+   - 파라미터 모드: `IN OUT` → `INOUT`, Oracle의 `DEFAULT` 값 표기는 그대로 사용 가능
+   - 파라미터/변수 타입에서 길이 제약 제거: `VARCHAR2(50)` → `VARCHAR` (PG는 파라미터에 길이 지정 불가)
+3. PL/SQL 블록 문법 변환:
+   - 선언부 `IS` / `AS` → `AS $$ DECLARE`, 블록 종료 → `END; $$;`
+   - `SQL%ROWCOUNT` → `GET DIAGNOSTICS v_cnt = ROW_COUNT`
+   - `RAISE_APPLICATION_ERROR(-20001, msg)` → `RAISE EXCEPTION '%', msg USING ERRCODE = 'P0001'`
+   - `DBMS_OUTPUT.PUT_LINE(x)` → `RAISE NOTICE '%', x`
+   - 예외명: `NO_DATA_FOUND` → `NO_DATA_FOUND`, `TOO_MANY_ROWS` → `TOO_MANY_ROWS`,
+     `DUP_VAL_ON_INDEX` → `unique_violation`, `OTHERS` → `OTHERS`
+   - `SQLCODE` → `SQLSTATE`, `SQLERRM` → `SQLERRM` (그대로 사용 가능)
+   - 사용자 정의 예외(`EXCEPTION` 선언 + `RAISE`) → PG는 예외 타입 선언이 없으므로
+     `RAISE EXCEPTION ... USING ERRCODE='<5자리 코드>'` + `WHEN SQLSTATE '<코드>' THEN` 패턴으로 재작성
+   - 커서: `CURSOR c IS ...` → `c CURSOR FOR ...`, `c%NOTFOUND` → `NOT FOUND`,
+     `c%ISOPEN`은 PG에 없으므로 플래그 변수로 대체
+   - `CONTINUE` / `EXIT WHEN` → `CONTINUE` / `EXIT WHEN` (지원됨)
+   - 로컬(중첩) 프로시저/함수 선언은 PG에서 지원되지 않습니다. 별도 최상위 함수로 분리하고 그 사실을 리포트에 명시하십시오.
+   - `PRAGMA AUTONOMOUS_TRANSACTION`은 PG에 대응 기능이 없습니다. 임의로 삭제하지 말고,
+     원본을 주석으로 남긴 뒤 `dblink`/`pg_background` 기반 대안을 리포트에 제시하고 `unconverted_items`에 반드시 포함하십시오.
+   - 컬렉션: 연관배열/중첩테이블 → 배열 타입 또는 임시 테이블, `BULK COLLECT INTO` → `SELECT ... INTO`(단건) 또는 배열 집계,
+     `FORALL` → 단일 집합 기반 DML로 재작성
+   - `EXECUTE IMMEDIATE sql INTO v` → `EXECUTE sql INTO v`, `USING` 바인딩은 그대로 사용 가능
+   - 프로시저 내 `COMMIT` / `ROLLBACK`은 PG 11+ PROCEDURE에서만 가능합니다. FUNCTION으로 변환하는 경우 제거하고 그 사실을 명시하십시오.
+   - `SYS_REFCURSOR` → `refcursor` (OUT 파라미터로 사용 시 `OPEN v FOR ...` 그대로 대응)
+   - 시퀀스: `SEQ.NEXTVAL` → `nextval('seq')`, `SEQ.CURRVAL` → `currval('seq')`
+4. SQL 문장 변환 (XML 매퍼와 동일 규칙):
+   - NVL → COALESCE, NVL2 → CASE WHEN, DECODE → CASE WHEN
+   - SYSDATE / SYSTIMESTAMP → CURRENT_TIMESTAMP, `FROM DUAL` 제거
+   - `(+)` 아우터조인 → LEFT/RIGHT OUTER JOIN (콤마 조인은 반드시 명시적 JOIN 체인으로 재작성)
+   - ROWNUM 페이징 → LIMIT / OFFSET, `ROWNUM = 1` → `LIMIT 1`
+   - LISTAGG / WM_CONCAT → STRING_AGG, CONNECT BY → WITH RECURSIVE
+   - MERGE INTO → INSERT ... ON CONFLICT (ON 절 컬럼은 UPDATE 대상이 될 수 없음에 주의)
+   - REGEXP_SUBSTR(str,'[^,]+',1,n) → `string_to_array` / `regexp_split_to_table` 등 PG 함수로 재작성
+   - Oracle 힌트(/*+ ... */) 제거
+5. 데이터타입: NUMBER→NUMERIC, VARCHAR2→VARCHAR, CLOB→TEXT, BLOB→BYTEA, DATE→TIMESTAMP, `%TYPE`/`%ROWTYPE`는 그대로 사용 가능
+6. ★ 날짜 연산 타입 차이 (반드시 준수):
+   - Oracle에서 날짜 - 날짜 = NUMBER(일수). PostgreSQL에서는 TIMESTAMP - TIMESTAMP = INTERVAL
+   - `TRUNC(SYSDATE) - TRUNC(col)` → `EXTRACT(DAY FROM (date_trunc('day', CURRENT_TIMESTAMP) - date_trunc('day', col)))::INTEGER`
+   - `TRUNC(SYSDATE - n) + 0.99999` 형태의 하루 끝 표현 → `date_trunc('day', CURRENT_TIMESTAMP - n * INTERVAL '1 day') + INTERVAL '1 day' - INTERVAL '1 microsecond'`
+   - 날짜 ± N일: `date + n` → `date + n * INTERVAL '1 day'`
+   - ADD_MONTHS(d, n) → `d + (n || ' months')::INTERVAL`
+   - TO_CHAR/TO_DATE 포맷 마스크는 대부분 호환되나 `HH24:MI:SS`, `YYYY.MM.DD` 등은 그대로 사용 가능
+7. ★ 타입 캐스팅 및 NULL 비교:
+   - PostgreSQL은 타입 비교에 엄격합니다. 숫자와 문자열 비교 시 명시적 캐스팅(`col::text`)을 추가하십시오.
+   - `col = NULL` → `col IS NULL`, `col != NULL` → `col IS NOT NULL`
+8. ★ 절대로 스크립트 내용을 생략하거나 말줄임표(...)를 사용하지 마십시오. 처음부터 끝까지 완전하게 작성하십시오.
+9. ★ 기계적으로 변환할 수 없는 요소(자율 트랜잭션, 패키지, 로컬 서브프로그램, DBMS_* 패키지 호출 등)는
+   임의로 삭제하거나 동작이 달라지게 바꾸지 말고, 원본을 주석으로 보존한 뒤 `unconverted_items`에 명시하십시오.
+
+## 응답 형식 (반드시 아래 JSON으로만):
+{{
+  "converted_sql": "변환된 PostgreSQL 스크립트 전문 (XML 태그 없음, 코드펜스 없음)",
+  "conversion_log": [
+    {{"category": "FUNCTION|JOIN|SYNTAX|HINT|DATATYPE", "before": "원본 조각", "after": "변환 조각"}}
+  ],
+  "difficulty_assessment": {{
+    "has_dynamic_tags": false,
+    "has_complex_functions": true/false,
+    "has_oracle_specific_syntax": true/false,
+    "unconverted_items": ["변환하지 못한 Oracle 전용 요소 목록 (없으면 빈 배열)"],
+    "confidence": 0.0에서 1.0 사이의 변환 확신도
+  }},
+  "ai_guide_report": "리포트 작성 가이드 (Markdown 형식): 반드시 최상단에 '### 변환 확신도: XX%'를 명시하십시오. 그 후 다음 순서로 작성하십시오: 1) 주요 변경 사항, 2) 주의사항, 3) 테스트 권장사항. Dry-run 검증이 수행되지 않으므로 '테스트 권장사항'에는 개발 DB에서 직접 컴파일·실행하여 확인할 항목을 구체적으로 기술하십시오."
+}}
+"""
 
 
 def _build_user_prompt(original_sql_xml: str, schema_context: str, tag_name: str) -> str:
@@ -265,14 +381,19 @@ def convert_query(
     schema_context: str,
     tag_name: str,
     system_prompt: Optional[str] = None,
-    model_override: Optional[str] = None
+    model_override: Optional[str] = None,
+    source_type: str = "xml",
 ) -> dict:
     """
     LLM을 호출하여 단일 쿼리를 변환합니다.
     model_override가 지정되면 enabled_models 내 존재할 때 한해 해당 모델을 사용합니다.
+    source_type='sql'인 경우 MyBatis XML이 아닌 PL/SQL 스크립트 전용 프롬프트를 사용합니다.
     """
     active_model = _resolve_model(model_override)
-    logger.info(f"[LLM] Active Model: {active_model} (override={model_override})")
+    is_sql_script = (source_type or "xml").lower() == "sql"
+    logger.info(
+        f"[LLM] Active Model: {active_model} (override={model_override}, source_type={source_type})"
+    )
 
     # Mock 모드
     if Config.LLM_MOCK_MODE:
@@ -282,7 +403,13 @@ def convert_query(
         return mock
 
     system_p = system_prompt or _build_system_prompt()
-    user_p = _build_user_prompt(original_sql_xml, schema_context, tag_name)
+    if is_sql_script:
+        # 전역/프로젝트 시스템 프롬프트는 MyBatis XML을 전제로 작성되어 있으므로
+        # .sql 스크립트 소스에서는 출력 형식 지침을 덧붙여 보정한다.
+        system_p = f"{system_p}\n\n{_SQL_SCRIPT_SYSTEM_SUFFIX}"
+        user_p = _build_sql_script_user_prompt(original_sql_xml, schema_context, tag_name)
+    else:
+        user_p = _build_user_prompt(original_sql_xml, schema_context, tag_name)
 
     last_error = None
     for attempt in range(1, Config.LLM_MAX_RETRIES + 2):
@@ -300,11 +427,16 @@ def convert_query(
 
             if parsed.get("converted_sql"):
                 sql = parsed["converted_sql"]
-                sql = sql.replace("&quot;", "'").replace("&apos;", "'")
-                # 일부 모델이 converted_sql에 <?xml ...?> + <mapper> 래퍼를 포함하는 경우 제거
-                sql = re.sub(r'<\?xml[^?]*\?>\s*', '', sql)
-                sql = re.sub(r'<mapper[^>]*>\s*', '', sql)
-                sql = re.sub(r'\s*</mapper>\s*$', '', sql.rstrip())
+                if is_sql_script:
+                    # .sql 소스: XML 래퍼는 애초에 없고, 코드펜스 혼입만 제거한다.
+                    # (SQL의 큰따옴표 식별자를 훼손하지 않도록 엔티티 치환은 하지 않음)
+                    sql = _strip_code_fence(sql)
+                else:
+                    sql = sql.replace("&quot;", "'").replace("&apos;", "'")
+                    # 일부 모델이 converted_sql에 <?xml ...?> + <mapper> 래퍼를 포함하는 경우 제거
+                    sql = re.sub(r'<\?xml[^?]*\?>\s*', '', sql)
+                    sql = re.sub(r'<mapper[^>]*>\s*', '', sql)
+                    sql = re.sub(r'\s*</mapper>\s*$', '', sql.rstrip())
                 parsed["converted_sql"] = sql.strip()
             
             return parsed

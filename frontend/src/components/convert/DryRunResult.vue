@@ -3,7 +3,8 @@
 
     <!-- 컴팩트 모드 (테이블용) -->
     <template v-if="compact">
-      <span v-if="result?.is_success" class="status status-success">✅ 성공</span>
+      <span v-if="isSkipped" class="status status-skip">⏭️ 미수행</span>
+      <span v-else-if="result?.is_success" class="status status-success">✅ 성공</span>
       <span v-else class="status status-fail">❌ 실패</span>
     </template>
 
@@ -15,7 +16,10 @@
           <span class="icon">🧪</span>
           <h4 class="title">Dry Run 결과</h4>
         </div>
-        <span v-if="result?.is_success" class="status-badge status-success">
+        <span v-if="isSkipped" class="status-badge status-skip">
+          ⏭️ Dry-run 미수행
+        </span>
+        <span v-else-if="result?.is_success" class="status-badge status-success">
           ✅ EXPLAIN 성공
         </span>
         <span v-else class="status-badge status-fail">
@@ -25,6 +29,19 @@
 
       <div v-if="!result" class="empty-state">
         <p>Dry Run 결과가 없습니다.</p>
+      </div>
+
+      <!-- ────── 미수행 (.sql 소스 등) ────── -->
+      <div v-else-if="isSkipped" class="dry-run-body">
+        <div class="section skip-section">
+          <div class="section-header skip-header">
+            <span class="section-icon">⏭️</span>
+            <span class="section-title">{{ result.skip_reason || 'Dry-run을 수행하지 않았습니다.' }}</span>
+          </div>
+          <div class="skip-block" v-if="result.error_hint">
+            <div class="skip-content" v-html="renderHint(result.error_hint)"></div>
+          </div>
+        </div>
       </div>
 
       <div v-else class="dry-run-body">
@@ -95,6 +112,12 @@ export default {
       default: false
     }
   },
+  computed: {
+    /** Dry-run을 아예 수행하지 않은 경우 (.sql 스크립트 소스 등) */
+    isSkipped() {
+      return Boolean(this.result?.is_skipped)
+    }
+  },
   methods: {
     renderHint(hint) {
       if (!hint) return ''
@@ -132,6 +155,11 @@ export default {
 .status-fail {
   background: #ffebee;
   color: #c62828;
+}
+
+.status-skip {
+  background: #eef4ff;
+  color: #33478a;
 }
 
 /* ── 상세 모드 헤더 ── */
@@ -178,6 +206,42 @@ export default {
   background: linear-gradient(135deg, #ffebee, #ffcdd2);
   color: #b71c1c;
   border: 1px solid #ef9a9a;
+}
+
+.status-badge.status-skip {
+  background: linear-gradient(135deg, #eef4ff, #dbe7ff);
+  color: #1e3a8a;
+  border: 1px solid #c7d8ff;
+}
+
+/* ── Dry-run 미수행 섹션 ── */
+.skip-section {
+  border-color: #c7d8ff;
+}
+
+.skip-header {
+  background: linear-gradient(135deg, #eef4ff, #f5f8ff);
+  border-bottom-color: #c7d8ff;
+}
+
+.skip-header .section-title {
+  color: #1e3a8a;
+}
+
+.skip-block {
+  background: #f8fbff;
+  padding: 16px;
+}
+
+.skip-content {
+  font-size: 13.5px;
+  color: #334155;
+  line-height: 1.8;
+}
+
+.skip-content :deep(strong) {
+  color: #1e3a8a;
+  font-weight: 700;
 }
 
 /* ── 바디 ── */

@@ -1,7 +1,7 @@
 <template>
   <div class="convert-view">
     <h2 class="page-title">쿼리 변환</h2>
-    <p class="page-desc">MyBatis XML 또는 엑셀 파일을 업로드하여 Oracle 쿼리를 PostgreSQL로 변환합니다.</p>
+    <p class="page-desc">MyBatis XML · 엑셀 · SQL 스크립트를 업로드하여 Oracle 쿼리를 PostgreSQL로 변환합니다.</p>
 
     <!-- 프로젝트 미설정 경고 -->
     <div class="alert alert-warning" v-if="!project.project_id">
@@ -58,7 +58,10 @@
 
     <!-- 변환 버튼 및 상태 -->
     <div class="action-bar" v-if="queries.length > 0">
-      <span class="query-count">{{ queries.length }}개 쿼리 발견</span>
+      <span class="query-count">
+        {{ queries.length }}개 {{ sourceType === 'sql' ? '오브젝트' : '쿼리' }} 발견
+        <span class="source-badge" v-if="sourceType === 'sql'">Dry-run 미수행</span>
+      </span>
       <div class="action-right" v-if="!loading && results.length === 0">
         <button
           class="btn btn-primary"
@@ -149,6 +152,7 @@ export default {
     return {
       fileName: '',
       namespace: '',
+      sourceType: 'xml',
       queries: [],
       results: [],
       selectedQuery: null,
@@ -238,6 +242,8 @@ export default {
     loadFromHistory(data) {
       this.fileName = data.xml_file_name
       this.namespace = data.project_id // namespace 대신 project_id로 저장되어 있으므로 적절히 대응
+      // 히스토리에는 소스 종류가 별도 저장되지 않으므로 파일명으로 추정
+      this.sourceType = data.source_type || this.inferSourceType(data.xml_file_name)
       this.queries = data.queries.map(q => ({
         query_id: q.query_id,
         tag_name: q.tag_name,
@@ -248,9 +254,20 @@ export default {
       this.selectedQuery = null
     },
 
-    handleFileParsed({ fileName, namespace, queries }) {
+    /**
+     * 파일명으로 소스 종류를 추정합니다. (히스토리 복원용)
+     */
+    inferSourceType(fileName) {
+      const name = (fileName || '').toLowerCase()
+      if (name.endsWith('.sql')) return 'sql'
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) return 'excel'
+      return 'xml'
+    },
+
+    handleFileParsed({ fileName, namespace, sourceType, queries }) {
       this.fileName = fileName
       this.namespace = namespace
+      this.sourceType = sourceType || 'xml'
       this.queries = queries
       this.results = []
       this.selectedQuery = null
@@ -274,6 +291,7 @@ export default {
           xml_file_name: this.fileName,
           mapper_namespace: this.namespace,
           file_created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+          source_type: this.sourceType || 'xml',
           queries: this.queries,
           system_prompt_override: this.oneTimePrompt,
           model_override: this.selectedModel || null
@@ -310,13 +328,51 @@ export default {
     },
 
     downloadResult() {
-      const isExcel = this.fileName.endsWith('.xlsx') || this.fileName.endsWith('.xls')
-
-      if (isExcel) {
+      if (this.sourceType === 'excel') {
         this.downloadExcel()
+      } else if (this.sourceType === 'sql') {
+        this.downloadSql()
       } else {
         this.downloadXml()
       }
+    },
+
+    /**
+     * .sql 소스 결과 다운로드 — 오브젝트별로 구분 주석을 붙인 실행 가능한 스크립트
+     */
+    downloadSql() {
+      const header = [
+        '-- ============================================================',
+        `-- AQMS 변환 결과 (원본: ${this.fileName})`,
+        `-- 변환 모델: ${this.usedModel || '-'}`,
+        '-- ※ Dry-run(EXPLAIN) 검증은 수행되지 않았습니다. 개발 DB에서 직접 컴파일하여 확인하세요.',
+        '-- ============================================================',
+        ''
+      ].join('\n')
+
+      const body = this.results
+        .map(query => {
+          const meta = [
+            `-- ── ${query.query_id} (${query.tag_name}) ──`,
+            `-- 난이도: Level ${query.difficulty_level}` +
+              ` / 확신도: ${this.formatConfidence(query.confidence_score)}`
+          ].join('\n')
+          return `${meta}\n${query.converted_sql}\n`
+        })
+        .join('\n')
+
+      const blob = new Blob([`${header}\n${body}`], { type: 'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = this.fileName.replace(/\.sql$/i, '') + '_postgresql.sql'
+      a.click()
+      URL.revokeObjectURL(url)
+    },
+
+    formatConfidence(score) {
+      if (score === undefined || score === null) return '-'
+      return Math.round(score * 100) + '%'
     },
 
     downloadXml() {
@@ -493,6 +549,18 @@ export default {
 .query-count {
   font-size: 14px;
   color: #666;
+}
+
+.source-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #eef4ff;
+  border: 1px solid #c7d8ff;
+  color: #33478a;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .btn {

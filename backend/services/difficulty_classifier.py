@@ -33,9 +33,14 @@ def _is_skip_dryrun_error(dry_run_result: DryRunResult) -> bool:
     Dry-run 실패 원인이 인프라 문제나 스키마 부재인지 판별합니다.
     - True인 경우: Dry-run 결과를 무시하고 LLM 시그널만으로 판정
     - False인 경우: 실제 SQL 문법 오류로 간주하여 Level 3 강제
+
+    .sql 스크립트 소스처럼 Dry-run을 애초에 수행하지 않은 경우(is_skipped)도
+    '검증 실패'가 아니므로 시그널에서 제외합니다.
     """
     if dry_run_result.is_success:
         return False
+    if getattr(dry_run_result, "is_skipped", False):
+        return True
     err = (dry_run_result.error_message or "").lower()
     return any(pattern.lower() in err for pattern in _SKIP_DRYRUN_PATTERNS)
 
@@ -78,12 +83,18 @@ def classify_difficulty(
 
     if not dry_run_result.is_success:
         if _is_skip_dryrun_error(dry_run_result):
-            # 인프라/스키마 문제 → Dry-run 시그널 무시
+            # 인프라/스키마 문제 또는 애초에 미수행 → Dry-run 시그널 무시
             dryrun_available = False
-            logger.info(
-                "[Difficulty] Dry-run 스킵 (연결/스키마 부재): %s",
-                dry_run_result.error_message or "(에러 메시지 없음)",
-            )
+            if getattr(dry_run_result, "is_skipped", False):
+                logger.info(
+                    "[Difficulty] Dry-run 미수행: %s",
+                    dry_run_result.skip_reason or "(사유 없음)",
+                )
+            else:
+                logger.info(
+                    "[Difficulty] Dry-run 스킵 (연결/스키마 부재): %s",
+                    dry_run_result.error_message or "(에러 메시지 없음)",
+                )
         else:
             # SQL EXPLAIN 실패 → 실제 변환 품질 문제 → Level 3
             logger.info(

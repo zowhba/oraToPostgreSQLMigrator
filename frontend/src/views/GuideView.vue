@@ -5,7 +5,7 @@
       <div class="header-badge">📖 사용 가이드</div>
       <h1 class="guide-title">Oracle → PostgreSQL<br>SQL 마이그레이터</h1>
       <p class="guide-subtitle">
-        MyBatis XML 기반 Oracle SQL을 PostgreSQL 호환 SQL로 자동 변환하고,<br>
+        MyBatis XML · 엑셀 · SQL 스크립트의 Oracle SQL을 PostgreSQL 호환 SQL로 자동 변환하고,<br>
         실제 DB 환경에서 안전하게 검증하는 AI 마이그레이션 도구입니다.
       </p>
     </div>
@@ -17,8 +17,8 @@
         <div class="pipeline-step">
           <div class="step-num">1</div>
           <div class="step-icon">📂</div>
-          <div class="step-label">XML 업로드</div>
-          <div class="step-desc">MyBatis Mapper XML 파일</div>
+          <div class="step-label">파일 업로드</div>
+          <div class="step-desc">XML / 엑셀 / SQL 스크립트</div>
         </div>
         <div class="pipeline-arrow">→</div>
         <div class="pipeline-step">
@@ -39,14 +39,50 @@
           <div class="step-num">4</div>
           <div class="step-icon">🧪</div>
           <div class="step-label">Dry-run</div>
-          <div class="step-desc">PostgreSQL EXPLAIN 검증</div>
+          <div class="step-desc">PostgreSQL EXPLAIN 검증<br><em>(.sql 소스는 생략)</em></div>
         </div>
         <div class="pipeline-arrow">→</div>
         <div class="pipeline-step">
           <div class="step-num">5</div>
           <div class="step-icon">📥</div>
           <div class="step-label">결과 다운로드</div>
-          <div class="step-desc">XML / Excel 내보내기</div>
+          <div class="step-desc">XML / Excel / SQL 내보내기</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 입력 파일 종류 -->
+    <section class="guide-section">
+      <h2 class="section-title">📂 지원 입력 파일</h2>
+      <div class="tag-table source-table">
+        <div class="tag-row source-row header">
+          <div>확장자</div>
+          <div>내용</div>
+          <div>Dry-run</div>
+          <div>비고</div>
+        </div>
+        <div class="tag-row source-row">
+          <div><code>.xml</code></div>
+          <div>MyBatis Mapper XML</div>
+          <div>✅ 수행</div>
+          <div>동적 태그 구조를 보존한 채 변환합니다.</div>
+        </div>
+        <div class="tag-row source-row">
+          <div><code>.xlsx</code> / <code>.xls</code></div>
+          <div>첫 번째 컬럼의 쿼리 목록</div>
+          <div>✅ 수행</div>
+          <div>내부적으로 <code>&lt;select&gt;</code> 태그로 감싸 처리합니다.</div>
+        </div>
+        <div class="tag-row source-row">
+          <div><code>.sql</code></div>
+          <div>프로시저 · 함수 · 패키지 등 SQL 스크립트</div>
+          <div>⏭️ 생략</div>
+          <div>
+            <code>CREATE PROCEDURE</code> 같은 DDL은 <code>EXPLAIN</code> 대상이 아니고,
+            실제 실행 시 대상 DB에 오브젝트가 생성되므로 검증을 건너뜁니다.
+            프로젝트에 설정된 스키마 정보는 변환 참고용으로 계속 사용되며,
+            난이도는 AI 시그널만으로 판정됩니다.
+          </div>
         </div>
       </div>
     </section>
@@ -776,6 +812,11 @@ export default {
 
 .tag-row:last-child {
   border-bottom: none;
+}
+
+/* 입력 파일 종류 테이블 (4열) */
+.tag-row.source-row {
+  grid-template-columns: 130px 1.2fr 100px 2.4fr;
 }
 
 .tag-row > div {

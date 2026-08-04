@@ -16,6 +16,7 @@ from backend.schemas.convert import (
     QueryResult,
     ConversionLogEntry,
     DryRunResult,
+    is_dryrun_skipped_source,
 )
 from backend.services import project_service
 from backend.services import llm_client
@@ -38,6 +39,25 @@ _DB_UNREACHABLE_RESULT = DryRunResult(
         "  - 설정 메뉴에서 DB 호스트, 포트, 계정 정보가 올바른지 확인하세요\n"
         "  - DB 서버가 실행 중이고 네트워크 접근이 가능한지 확인하세요\n"
         "  - 방화벽 또는 VPN 설정으로 인해 접속이 차단되었을 수 있습니다"
+    ),
+)
+
+# .sql 스크립트(프로시저·함수 등) 소스에서 Dry-run을 생략할 때 사용하는 결과
+_DRYRUN_SKIPPED_RESULT = DryRunResult(
+    is_success=False,
+    is_skipped=True,
+    skip_reason=".sql 스크립트 소스는 Dry-run을 수행하지 않습니다.",
+    executed_sql=None,
+    explain_plan=None,
+    error_message=None,
+    error_hint=(
+        "📌 **Dry-run 미수행**: 업로드한 파일이 프로시저·함수 등을 담은 `.sql` 스크립트입니다.\n\n"
+        "`CREATE PROCEDURE` 같은 DDL은 `EXPLAIN` 대상이 아니고, 실제로 실행하면 대상 DB에 "
+        "오브젝트가 생성되므로 검증 단계를 건너뜁니다.\n\n"
+        "💡 **참고**:\n"
+        "  - 프로젝트에 설정된 대상 DB의 스키마 정보는 변환 시 참고 자료로 계속 활용됩니다\n"
+        "  - 변환 결과는 별도 개발 DB에 직접 반영하여 컴파일 여부를 확인하세요\n"
+        "  - 난이도는 Dry-run 없이 AI 시그널만으로 판정됩니다"
     ),
 )
 
@@ -89,8 +109,19 @@ def stream_conversion(request: ConvertRequest):
     db_config: Optional[DBConfig] = project_service.get_db_config(request.project_id)
     total_queries = len(request.queries)
     start_time = time.time()
-    
-    logger.info("[Convert] 시작 — project=%s, file=%s, queries=%d", request.project_id, request.xml_file_name, total_queries)
+
+    # .sql 스크립트 소스는 Dry-run을 생략한다 (스키마 참고 및 나머지 처리는 XML과 동일)
+    source_type = request.source_type or "xml"
+    skip_dryrun = is_dryrun_skipped_source(source_type)
+
+    logger.info(
+        "[Convert] 시작 — project=%s, file=%s, source_type=%s, queries=%d, dryrun=%s",
+        request.project_id,
+        request.xml_file_name,
+        source_type,
+        total_queries,
+        "skip" if skip_dryrun else "on",
+    )
 
     # 효과적인 시스템 프롬프트 결정
     effective_system_prompt = request.system_prompt_override
@@ -146,6 +177,7 @@ def stream_conversion(request: ConvertRequest):
                 tag_name=query.tag_name,
                 system_prompt=effective_system_prompt,
                 model_override=request.model_override,
+                source_type=source_type,
             )
 
             converted_sql = llm_response.get("converted_sql", query.original_sql_xml)
@@ -167,16 +199,22 @@ def stream_conversion(request: ConvertRequest):
                 if isinstance(log, dict)
             ]
 
-            # 3c. Dry-run 실행 단계
+            # 3c. Dry-run 실행 단계 (.sql 소스는 생략)
             yield {
                 "type": "progress",
                 "current": idx - 0.2,
                 "total": total_queries,
-                "message": f"[{idx}/{total_queries}] Dry-run 검증 중: {query.query_id}",
+                "message": (
+                    f"[{idx}/{total_queries}] Dry-run 생략(.sql): {query.query_id}"
+                    if skip_dryrun
+                    else f"[{idx}/{total_queries}] Dry-run 검증 중: {query.query_id}"
+                ),
                 "estimated_seconds": (total_queries - idx + 1) * 6 - 4
             }
-            
-            if db_reachable:
+
+            if skip_dryrun:
+                dry_run_result = _DRYRUN_SKIPPED_RESULT
+            elif db_reachable:
                 dry_run_result = dryrun_service.execute_dry_run(db_config, converted_sql)
             else:
                 dry_run_result = _DB_UNREACHABLE_RESULT
@@ -212,6 +250,7 @@ def stream_conversion(request: ConvertRequest):
                 difficulty_level=3,
                 converted_sql=query.original_sql_xml,
                 conversion_log=[],
+                # 변환 자체가 실패한 경우는 소스 종류와 무관하게 오류로 기록한다
                 dry_run_result=DryRunResult(
                     is_success=False,
                     error_message=f"변환 처리 중 오류: {str(e)}",
@@ -250,6 +289,7 @@ def stream_conversion(request: ConvertRequest):
     response = ConvertResponse(
         project_id=request.project_id,
         xml_file_name=request.xml_file_name,
+        source_type=source_type,
         duration_seconds=duration,
         used_model=active_model,
         total_input_tokens=total_input_tokens,

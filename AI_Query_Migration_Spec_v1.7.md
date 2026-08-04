@@ -151,8 +151,9 @@ Frontend가 XML을 파싱하여 JSON으로 전달하면, Backend가 DDL 인지 �
 | :--- | :--- | :---: | :--- |
 | **`project_id`** | String | Y | DB 매핑 및 DDL 조회를 위한 키값 |
 | **`xml_file_name`** | String | Y | 원본 파일명 (예: UserMapper.xml) |
-| **`mapper_namespace`** | String | Y | 원본 XML의 `<mapper namespace="...">` 값 |
+| **`mapper_namespace`** | String | N | 원본 XML의 `<mapper namespace="...">` 값 (`.sql`/엑셀은 파일명으로 대체, 기본값 `""`) |
 | **`file_created_at`** | String | Y | 요청 생성 일시 (`YYYY-MM-DD HH:mm:ss`) |
+| **`source_type`** | String | N | 원본 파일 종류 — `xml`(기본값) \| `excel` \| `sql`. `sql`인 경우 Dry-run을 수행하지 않음 |
 
 #### **(나) 쿼리 단위 데이터 (Query Unit)**
 | 필드명 | 타입 | 발신(FE) | 수신(BE) | 설명 |
@@ -175,8 +176,60 @@ Frontend가 XML을 파싱하여 JSON으로 전달하면, Backend가 DDL 인지 �
 
 **② `dry_run_result` (객체)**
 - **`is_success`**: Boolean (실행 성공 여부) [cite: 49]
+- **`is_skipped`**: Boolean (Dry-run을 아예 수행하지 않은 경우 `true`. **실패와 구분되며 난이도 분류 시그널에서 제외됨**)
+- **`skip_reason`**: String (Dry-run을 생략한 사유)
 - **`explain_plan`**: String (성공 시 PostgreSQL 실행 계획) [cite: 49]
 - **`error_message`**: String (실패 시 DB 에러 메시지) [cite: 49]
+
+### 3.3. `.sql` 스크립트 소스 처리 규칙 (`source_type = "sql"`)
+프로시저·함수·패키지 등이 담긴 순수 SQL 스크립트를 입력으로 받을 때의 예외 규칙입니다.
+
+| 단계 | XML/엑셀 소스 | `.sql` 소스 |
+| :--- | :--- | :--- |
+| 파일 파싱 | MyBatis 태그 단위 | 문장/오브젝트 단위 (단독 `/` 라인, 문자열·주석 인식 `;` 분할) |
+| `query_id` | MyBatis SQL ID | 오브젝트명 (없으면 `NNN_앞단어` 형식) |
+| `tag_name` | select/insert/update/delete | procedure / function / package_body / trigger / table / … |
+| `original_sql_xml` | XML 조각 | **XML 래핑 없는 순수 SQL 원문** |
+| DDL 스키마 조회 | 수행 | **수행 (변환 참고용으로 동일하게 사용)** |
+| LLM 변환 프롬프트 | MyBatis 동적 태그 보존 규칙 | **PL/SQL → PL/pgSQL 변환 규칙** |
+| Dry-run (EXPLAIN) | 수행 | **미수행** (`is_skipped = true`) |
+| 난이도 분류 | Dry-run + LLM 시그널 | **LLM 시그널만** 사용 |
+| 결과 다운로드 | `_postgresql.xml` / `.xlsx` | `_postgresql.sql` |
+
+> **Dry-run을 생략하는 이유**: `CREATE OR REPLACE PROCEDURE` 등의 DDL은 `EXPLAIN` 대상이 아니며,
+> 실제로 실행하면 대상 DB에 오브젝트가 생성되어 검증이 아닌 반영이 되어 버립니다.
+
+**[Request 샘플: `.sql` 소스]**
+```json
+{
+  "project_id": "PRJ_SKB_001",
+  "xml_file_name": "SP_DM_DVC_UPD_FLAG_SET.sql",
+  "mapper_namespace": "",
+  "file_created_at": "2026-08-04 15:00:00",
+  "source_type": "sql",
+  "queries": [
+    {
+      "query_id": "SP_DM_DVC_UPD_FLAG_SET",
+      "tag_name": "procedure",
+      "attributes": { "objectType": "procedure" },
+      "original_sql_xml": "CREATE OR REPLACE PROCEDURE SP_DM_DVC_UPD_FLAG_SET(...) IS BEGIN ... END;"
+    }
+  ]
+}
+```
+
+**[Response 샘플: `dry_run_result`]**
+```json
+{
+  "is_success": false,
+  "is_skipped": true,
+  "skip_reason": ".sql 스크립트 소스는 Dry-run을 수행하지 않습니다.",
+  "executed_sql": null,
+  "explain_plan": null,
+  "error_message": null,
+  "error_hint": "📌 **Dry-run 미수행**: ..."
+}
+```
 
 ### 3.2. 통신 샘플 (Interface B)
 **[Request: FE → BE]**

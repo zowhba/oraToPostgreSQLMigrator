@@ -4,11 +4,15 @@
 #
 #   ./deploy.sh              최신 소스로 이미지 빌드 후 컨테이너 재기동 (기본)
 #   ./deploy.sh --pull       git pull 후 배포
-#   ./deploy.sh status       컨테이너 상태 확인
+#   ./deploy.sh status       컨테이너 상태 확인 (포트 점유 현황 포함)
 #   ./deploy.sh logs         로그 실시간 확인 (Ctrl+C로 빠져나옴)
 #   ./deploy.sh restart      재시작 (.env 변경분은 반영되지 않음 → deploy 사용)
 #   ./deploy.sh stop         중지 및 컨테이너 삭제
 #   ./deploy.sh rollback     직전 이미지로 되돌리기
+#
+#   옵션:
+#     --force, -f            포트를 점유한 컨테이너/프로세스를 확인 없이 정리
+#     --pull                 배포 전 git pull 수행
 #
 # 컨테이너는 --restart unless-stopped 로 기동되므로
 # 터미널을 닫거나 서버가 재부팅되어도 자동으로 다시 올라옵니다.
@@ -21,6 +25,7 @@ IMAGE="${IMAGE:-aqms}"
 PORT="${PORT:-80}"
 ENV_FILE="${ENV_FILE:-.env}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"
+FORCE="${FORCE:-0}"        # 1이면 포트 점유 대상을 확인 없이 정리
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -60,12 +65,151 @@ ensure_docker() {
 container_exists() { $DOCKER ps -aq -f "name=^${APP_NAME}$" | grep -q .; }
 container_running() { $DOCKER ps -q -f "name=^${APP_NAME}$" | grep -q .; }
 
+# ── 포트 점유 확인 및 정리 ───────────────────────────────
+
+# 해당 포트를 LISTEN 중인 호스트 PID 목록
+port_listener_pids() {
+  if command -v ss >/dev/null 2>&1; then
+    sudo ss -lntpH "sport = :${PORT}" 2>/dev/null \
+      | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u
+  elif command -v lsof >/dev/null 2>&1; then
+    sudo lsof -ti "tcp:${PORT}" -sTCP:LISTEN 2>/dev/null | sort -u
+  fi
+}
+
+port_in_use() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -lntH "sport = :${PORT}" 2>/dev/null | grep -q .
+  elif command -v lsof >/dev/null 2>&1; then
+    sudo lsof -ti "tcp:${PORT}" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    return 1   # 확인 수단이 없으면 점유되지 않은 것으로 간주하고 진행
+  fi
+}
+
+# 해당 포트를 게시(publish)하고 있는 다른 컨테이너 ID 목록
+conflicting_containers() {
+  $DOCKER ps -q --filter "publish=${PORT}" 2>/dev/null \
+    | while read -r cid; do
+        [ -n "$cid" ] || continue
+        # 우리 컨테이너는 제외 (어차피 배포 직전에 제거됨)
+        name="$($DOCKER inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||')"
+        [ "$name" = "$APP_NAME" ] || echo "$cid"
+      done
+}
+
+confirm() {
+  local prompt="$1"
+
+  if [ "$FORCE" = "1" ]; then
+    return 0
+  fi
+
+  if [ ! -t 0 ]; then
+    die "대화형 터미널이 아니므로 확인을 받을 수 없습니다. --force 옵션을 사용하세요."
+  fi
+
+  local answer
+  read -r -p "${prompt} [y/N] " answer
+  case "$answer" in
+    [yY]|[yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 포트를 점유한 컨테이너/프로세스를 정리한다.
+free_port() {
+  port_in_use || return 0
+
+  echo
+  warn "포트 ${PORT}이(가) 이미 사용 중입니다."
+
+  # ── 1) 다른 도커 컨테이너가 잡고 있는 경우 ──
+  local cids
+  cids="$(conflicting_containers || true)"
+
+  if [ -n "$cids" ]; then
+    echo
+    echo "  ── 포트 ${PORT}을 사용 중인 컨테이너 ──"
+    for cid in $cids; do
+      $DOCKER ps --filter "id=${cid}" \
+        --format '  {{.Names}}  ({{.Image}})  {{.Status}}  {{.Ports}}' 2>/dev/null \
+        || echo "  $cid"
+    done
+    echo
+
+    if confirm "위 컨테이너를 중지하고 계속할까요?"; then
+      for cid in $cids; do
+        local cname
+        cname="$($DOCKER inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||')"
+        info "컨테이너 중지: ${cname:-$cid}"
+        # --restart 정책 때문에 되살아나지 않도록 정책을 먼저 해제
+        $DOCKER update --restart=no "$cid" >/dev/null 2>&1 || true
+        $DOCKER stop "$cid" >/dev/null 2>&1 || true
+      done
+      ok "충돌 컨테이너 중지 완료"
+    else
+      die "배포를 중단했습니다. (PORT=8080 ./deploy.sh 처럼 다른 포트를 쓸 수도 있습니다)"
+    fi
+  fi
+
+  # ── 2) 여전히 점유 중이면 호스트 프로세스 ──
+  sleep 1
+  port_in_use || return 0
+
+  local pids
+  pids="$(port_listener_pids || true)"
+
+  if [ -z "$pids" ]; then
+    die "포트 ${PORT}이 사용 중이지만 점유 프로세스를 확인하지 못했습니다. 'sudo ss -lntp | grep :${PORT}' 로 직접 확인해 주세요."
+  fi
+
+  echo
+  echo "  ── 포트 ${PORT}을 사용 중인 호스트 프로세스 ──"
+  for pid in $pids; do
+    printf '  PID %-8s %s\n' "$pid" "$(ps -p "$pid" -o args= 2>/dev/null | cut -c1-100)"
+  done
+  echo
+  warn "도커 컨테이너가 아닌 서버의 프로세스입니다. (예: 호스트에 설치된 nginx/httpd)"
+  warn "   systemd 서비스라면 'sudo systemctl disable --now nginx' 처럼 정식으로 내리는 편이 안전합니다."
+  echo
+
+  if confirm "위 프로세스를 종료하고 계속할까요?"; then
+    for pid in $pids; do
+      info "프로세스 종료: PID ${pid}"
+      sudo kill "$pid" 2>/dev/null || true
+    done
+
+    # 최대 10초 대기 후 강제 종료
+    local waited=0
+    while port_in_use && [ "$waited" -lt 10 ]; do
+      sleep 1
+      waited=$((waited + 1))
+    done
+
+    if port_in_use; then
+      warn "정상 종료되지 않아 강제 종료합니다."
+      for pid in $pids; do
+        sudo kill -9 "$pid" 2>/dev/null || true
+      done
+      sleep 2
+    fi
+
+    if port_in_use; then
+      die "포트 ${PORT}을 확보하지 못했습니다."
+    fi
+    ok "포트 ${PORT} 확보 완료"
+  else
+    die "배포를 중단했습니다. (PORT=8080 ./deploy.sh 처럼 다른 포트를 쓸 수도 있습니다)"
+  fi
+}
+
 # ── 컨테이너 기동 ────────────────────────────────────────
 run_container() {
   local tag="$1"
 
   info "컨테이너 기동 중... (${IMAGE}:${tag} → 포트 ${PORT})"
-  $DOCKER run -d \
+  if ! $DOCKER run -d \
     --name "$APP_NAME" \
     --restart unless-stopped \
     -p "${PORT}:80" \
@@ -76,6 +220,11 @@ run_container() {
     --health-timeout 5s \
     --health-retries 3 \
     "${IMAGE}:${tag}" >/dev/null
+  then
+    # 기동 실패 시 생성만 된 컨테이너가 남지 않도록 정리
+    $DOCKER rm -f "$APP_NAME" >/dev/null 2>&1 || true
+    die "컨테이너 기동에 실패했습니다."
+  fi
 }
 
 remove_container() {
@@ -150,6 +299,7 @@ cmd_deploy() {
   $DOCKER build -t "${IMAGE}:latest" .
 
   remove_container
+  free_port
   run_container latest
   wait_for_health
 
@@ -168,6 +318,7 @@ cmd_rollback() {
 
   info "직전 이미지로 롤백합니다."
   remove_container
+  free_port
   run_container previous
   wait_for_health
   ok "롤백 완료"
@@ -187,6 +338,16 @@ cmd_status() {
     fi
   else
     warn "컨테이너 '${APP_NAME}'가 없습니다. './deploy.sh' 로 배포하세요."
+  fi
+
+  # 포트 점유 현황
+  echo
+  echo "  ── 포트 ${PORT} 점유 현황 ──"
+  if command -v ss >/dev/null 2>&1; then
+    { sudo ss -lntp "sport = :${PORT}" 2>/dev/null || ss -lnt "sport = :${PORT}" 2>/dev/null; } \
+      | sed 's/^/  /' || true
+  else
+    echo "  (ss 명령이 없어 확인할 수 없습니다)"
   fi
 }
 
@@ -216,23 +377,32 @@ usage() {
 }
 
 # ── 진입점 ───────────────────────────────────────────────
-CMD="${1:-deploy}"
+CMD=""
+DO_PULL="no"
 
-# docker 확인 전에 명령어 유효성부터 판단 (도움말은 docker 없이도 동작)
-case "$CMD" in
-  -h|--help|help) usage; exit 0 ;;
-  deploy|""|--pull|pull|rollback|status|ps|logs|log|restart|stop|down) ;;
-  *) echo "알 수 없는 명령: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
-esac
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help|help) usage; exit 0 ;;
+    -f|--force)     FORCE=1 ;;
+    --pull)         DO_PULL="pull" ;;
+    deploy|pull|rollback|status|ps|logs|log|restart|stop|down)
+      if [ "$1" = "pull" ]; then DO_PULL="pull"; fi
+      if [ -z "$CMD" ]; then CMD="$1"; fi
+      ;;
+    *) echo "알 수 없는 인자: $1" >&2; echo >&2; usage >&2; exit 1 ;;
+  esac
+  shift
+done
+
+if [ -z "$CMD" ] || [ "$CMD" = "pull" ]; then CMD="deploy"; fi
 
 ensure_docker
 
 case "$CMD" in
-  deploy|"")   cmd_deploy no ;;
-  --pull|pull) cmd_deploy pull ;;
-  rollback)    cmd_rollback ;;
-  status|ps)   cmd_status ;;
-  logs|log)    cmd_logs ;;
-  restart)     cmd_restart ;;
-  stop|down)   cmd_stop ;;
+  deploy)    cmd_deploy "$DO_PULL" ;;
+  rollback)  cmd_rollback ;;
+  status|ps) cmd_status ;;
+  logs|log)  cmd_logs ;;
+  restart)   cmd_restart ;;
+  stop|down) cmd_stop ;;
 esac

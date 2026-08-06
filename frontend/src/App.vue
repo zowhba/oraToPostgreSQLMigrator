@@ -1,7 +1,10 @@
 <template>
-  <div class="app-container">
-    <AppHeader 
-      :projectName="currentProject.project_name" 
+  <!-- 로그인 등 인증 전 화면은 헤더/사이드바 없이 표시 -->
+  <router-view v-if="isBlankLayout" />
+
+  <div v-else class="app-container">
+    <AppHeader
+      :projectName="currentProject.project_name"
       :activeModelName="activeModelLabel"
     />
     <div class="app-body">
@@ -21,6 +24,7 @@
 import AppHeader from './components/layout/AppHeader.vue'
 import AppSidebar from './components/layout/AppSidebar.vue'
 import axios from 'axios'
+import { isLoggedIn } from './auth'
 
 export default {
   name: 'App',
@@ -53,6 +57,17 @@ export default {
   computed: {
     activeModelLabel() {
       return this.modelMapping[this.activeModel] || this.activeModel
+    },
+    isBlankLayout() {
+      return this.$route.meta && this.$route.meta.layout === 'blank'
+    }
+  },
+  watch: {
+    // 로그인 직후 헤더 정보를 채운다
+    $route() {
+      if (!this.isBlankLayout && !this.activeModel) {
+        this.fetchActiveModel()
+      }
     }
   },
   methods: {
@@ -61,6 +76,7 @@ export default {
       localStorage.setItem('currentProject', JSON.stringify(project))
     },
     async fetchActiveModel() {
+      if (!isLoggedIn()) return
       try {
         const response = await axios.get('/api/settings/active-model')
         if (response.data && response.data.active_model) {

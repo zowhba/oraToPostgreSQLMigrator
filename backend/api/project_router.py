@@ -1,9 +1,10 @@
 """
 Interface A — 프로젝트-DB 매핑 설정 라우터
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from typing import Optional
+from backend.api.deps import require_actor, require_admin
 from backend.schemas.project import (
     ProjectCreateRequest,
     ProjectCreateResponse,
@@ -16,21 +17,21 @@ from backend.services import project_service
 router = APIRouter(prefix="/api/projects", tags=["프로젝트 관리 (Interface A)"])
 
 
-@router.post("", response_model=ProjectCreateResponse)
+@router.post("", response_model=ProjectCreateResponse, dependencies=[Depends(require_admin)])
 async def create_project(req: ProjectCreateRequest):
-    """프로젝트 + DB 접속정보 등록 (기존 project_id가 있으면 수정)"""
+    """프로젝트 + DB 접속정보 등록 (기존 project_id가 있으면 수정) — Admin 전용"""
     return project_service.create_project(req)
 
 
-@router.get("", response_model=ProjectListResponse)
+@router.get("", response_model=ProjectListResponse, dependencies=[Depends(require_actor)])
 async def list_projects():
-    """등록된 프로젝트 목록 조회"""
+    """등록된 프로젝트 목록 조회 — Actor 이상"""
     return project_service.list_projects()
 
 
-@router.get("/{project_id}")
+@router.get("/{project_id}", dependencies=[Depends(require_actor)])
 async def get_project(project_id: str):
-    """단일 프로젝트 조회"""
+    """단일 프로젝트 조회 — Actor 이상"""
     proj = project_service.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail=f"프로젝트 '{project_id}'를 찾을 수 없습니다.")
@@ -54,9 +55,9 @@ async def get_project(project_id: str):
     }
 
 
-@router.delete("/{project_id}")
+@router.delete("/{project_id}", dependencies=[Depends(require_admin)])
 async def delete_project(project_id: str):
-    """프로젝트 삭제"""
+    """프로젝트 삭제 — Admin 전용"""
     deleted = project_service.delete_project(project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"프로젝트 '{project_id}'를 찾을 수 없습니다.")
@@ -64,13 +65,22 @@ async def delete_project(project_id: str):
 
 
 @router.post("/{project_id}/test-connection", response_model=ConnectionTestResponse)
-async def test_connection(project_id: str, config: Optional[DBConfig] = None):
+async def test_connection(
+    project_id: str,
+    config: Optional[DBConfig] = None,
+    user=Depends(require_actor),
+):
     """
-    DB 연결 테스트 
-    - body에 config가 있으면 해당 값으로 테스트
-    - body가 없으면 project_id로 저장된 설정 조회하여 테스트
+    DB 연결 테스트
+    - body에 config가 있으면 해당 값으로 테스트 (임의 접속정보 지정이므로 Admin 전용)
+    - body가 없으면 저장된 설정으로 테스트 (Actor 이상)
     """
     if config:
+        if user["role"] != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="임의의 DB 접속정보로 연결 테스트하는 것은 Admin만 가능합니다.",
+            )
         # 화면 입력값으로 테스트하되, 비밀번호 복구를 위해 project_id도 함께 전달
         return project_service.test_db_connection(project_id=project_id, config=config)
     else:

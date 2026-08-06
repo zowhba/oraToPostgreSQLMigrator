@@ -17,7 +17,7 @@
           <span v-if="!isAdmin" class="readonly-badge">읽기 전용</span>
         </label>
         <p class="field-desc">
-          전역 기본 모델입니다. 쿼리 변환 시 사용자는 이 모델을 기본값으로 사용하며, 매 요청마다 Admin이 활성화한 다른 모델로 변경할 수 있습니다.{{ !isAdmin ? ' (변경은 Admin 모드에서만 가능)' : '' }}
+          전역 기본 모델입니다. 쿼리 변환 시 사용자는 이 모델을 기본값으로 사용하며, 매 요청마다 Admin이 활성화한 다른 모델로 변경할 수 있습니다.{{ !isAdmin ? ' (변경은 Admin 권한 필요)' : '' }}
         </p>
         <div class="model-selector" :class="{ 'readonly-field': !isAdmin }">
           <div
@@ -40,7 +40,7 @@
           전역 기본 시스템 프롬프트
           <span v-if="!isAdmin" class="readonly-badge">읽기 전용</span>
         </label>
-        <p class="field-desc">새 프로젝트 생성 시 기본으로 사용되는 AI 지침입니다.{{ !isAdmin ? ' (편집은 Admin 모드에서만 가능)' : '' }}</p>
+        <p class="field-desc">새 프로젝트 생성 시 기본으로 사용되는 AI 지침입니다.{{ !isAdmin ? ' (편집은 Admin 권한 필요)' : '' }}</p>
         <textarea
           v-model="globalSystemPrompt"
           placeholder="AI에게 전달할 기본 지침을 입력하세요..."
@@ -57,7 +57,7 @@
           모델별 과금 정책
           <span v-if="!isAdmin" class="readonly-badge">읽기 전용</span>
         </label>
-        <p class="field-desc">USD 기준 1M(백만) 토큰당 가격입니다. 비용 예측에 사용됩니다.{{ !isAdmin ? ' (편집은 Admin 모드에서만 가능)' : '' }}</p>
+        <p class="field-desc">USD 기준 1M(백만) 토큰당 가격입니다. 비용 예측에 사용됩니다.{{ !isAdmin ? ' (편집은 Admin 권한 필요)' : '' }}</p>
         <div class="pricing-table-wrapper">
           <table class="pricing-table">
             <thead>
@@ -109,12 +109,12 @@
 
 <script>
 import axios from 'axios'
+import { can, ROLE_ADMIN } from '../auth'
 
 export default {
   name: 'GlobalSettingsView',
   data() {
     return {
-      isAdmin: false,
       activeModel: 'haiku-4.5',
       globalSystemPrompt: '',
       loading: false,
@@ -129,6 +129,9 @@ export default {
     }
   },
   computed: {
+    isAdmin() {
+      return can(ROLE_ADMIN)
+    },
     visibleModels() {
       return this.models.filter(m => this.enabledModelIds.includes(m.id))
     }
@@ -179,7 +182,7 @@ export default {
     },
     async saveSettings() {
       if (!this.isAdmin) {
-        alert('전역 설정 저장은 Admin 모드에서만 가능합니다.')
+        alert('전역 설정 저장은 Admin 권한이 있는 계정만 가능합니다.')
         return
       }
       this.loading = true
@@ -204,7 +207,6 @@ export default {
     }
   },
   async mounted() {
-    this.isAdmin = sessionStorage.getItem('sql_migrator_admin_authed') === '1'
     await this.fetchSettings()
     await this.fetchEnabledModels()
     await this.fetchPricing()

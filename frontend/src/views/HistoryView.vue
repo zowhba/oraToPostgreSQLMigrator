@@ -123,7 +123,7 @@
                         <button
                           class="btn-delete"
                           :disabled="!isAdmin"
-                          :title="isAdmin ? '히스토리를 삭제합니다.' : 'Admin 모드에서만 삭제할 수 있습니다.'"
+                          :title="isAdmin ? '히스토리를 삭제합니다.' : 'Admin 권한이 있는 계정만 삭제할 수 있습니다.'"
                           @click="deleteRecord(attempt.conversion_id)"
                         >삭제</button>
                       </div>
@@ -193,7 +193,7 @@
                   <button
                     class="btn-delete"
                     :disabled="!isAdmin"
-                    :title="isAdmin ? '히스토리를 삭제합니다.' : 'Admin 모드에서만 삭제할 수 있습니다.'"
+                    :title="isAdmin ? '히스토리를 삭제합니다.' : 'Admin 권한이 있는 계정만 삭제할 수 있습니다.'"
                     @click="deleteRecord(item.conversion_id)"
                   >삭제</button>
                 </div>
@@ -215,6 +215,7 @@
 
 <script>
 import { getHistory, getHistoryList, deleteHistory } from '../api'
+import { can, ROLE_ADMIN } from '../auth'
 
 export default {
   name: 'HistoryView',
@@ -225,12 +226,15 @@ export default {
       projects: [],
       flatHistory: [],
       expandedProjects: {},
-      expandedFiles: {},
-      isAdmin: false
+      expandedFiles: {}
+    }
+  },
+  computed: {
+    isAdmin() {
+      return can(ROLE_ADMIN)
     }
   },
   mounted() {
-    this.isAdmin = sessionStorage.getItem('sql_migrator_admin_authed') === '1'
     this.refreshHistory()
   },
   watch: {
@@ -344,7 +348,7 @@ export default {
 
     async deleteRecord(conversionId) {
       if (!this.isAdmin) {
-        alert('Admin 모드에서만 삭제할 수 있습니다. URL 끝에 /admin 으로 접속하세요.')
+        alert('Admin 권한이 있는 계정만 삭제할 수 있습니다.')
         return
       }
       if (!confirm(`이력 #${conversionId}을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return

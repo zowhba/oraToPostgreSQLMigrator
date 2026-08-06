@@ -28,6 +28,21 @@ class Config:
     SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
 
+    # ── 인증/권한 ──
+    # JWT 서명 키. 미설정 시 앱 DB(app_settings.jwt_secret)에 자동 생성/보관됩니다.
+    # 운영 환경에서는 반드시 명시적으로 지정하세요.
+    JWT_SECRET = os.getenv("JWT_SECRET")
+    JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))  # 기본 8시간
+    # Swagger/ReDoc 문서 노출 여부 (운영에서는 false 권장)
+    ENABLE_API_DOCS = os.getenv("ENABLE_API_DOCS", "false").lower() == "true"
+    # CORS 허용 오리진 (쉼표 구분). 미설정 시 동일 오리진 + 로컬 개발 서버만 허용
+    CORS_ORIGINS = [
+        o.strip() for o in os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000",
+        ).split(",") if o.strip()
+    ]
+
     # ── 앱 DB (프로젝트 정보 영속 저장) ──
     APP_DB_URL = os.getenv("APP_DB_URL")
     APP_DB_HOST = os.getenv("APP_DB_HOST", "localhost")

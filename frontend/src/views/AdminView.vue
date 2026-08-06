@@ -1,99 +1,184 @@
 <template>
   <div class="admin-view">
-    <!-- 패스워드 게이트 -->
-    <div v-if="!authenticated" class="login-card">
-      <div class="login-icon">🔐</div>
-      <h2>관리자 인증</h2>
-      <p class="login-desc">Admin 모드에 진입하려면 패스워드를 입력하세요.</p>
-      <form @submit.prevent="login">
-        <input
-          ref="pwInput"
-          v-model="password"
-          type="password"
-          placeholder="패스워드"
-          class="pw-input"
-          :disabled="loading"
-        />
-        <button type="submit" class="login-btn" :disabled="loading || !password">
-          {{ loading ? '확인 중...' : '입장' }}
-        </button>
-      </form>
-      <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">🛡️ 관리자</h2>
+        <p class="page-desc">계정/권한 및 시스템 설정을 관리합니다.</p>
+      </div>
     </div>
 
-    <!-- Admin 패널 -->
-    <div v-else>
-      <div class="page-header">
-        <div>
-          <h2 class="page-title">🛡️ 관리자 모드</h2>
-          <p class="page-desc">시스템 관리 전용 기능입니다.</p>
-        </div>
-        <button class="logout-btn" @click="logout">로그아웃</button>
+    <!-- ───────── 계정 관리 ───────── -->
+    <div class="card">
+      <div class="card-title">
+        <span>👥 계정 관리</span>
+        <span class="card-sub">계정을 생성하고 권한을 부여합니다. 비밀번호는 해시로만 저장됩니다.</span>
       </div>
 
-      <!-- LLM 모델 활성화 토글 -->
-      <div class="card">
-        <div class="card-title">
-          <span>🤖 LLM 모델 활성화</span>
-          <span class="card-sub">비활성화된 모델은 일반 사용자에게 노출되지 않습니다.</span>
-        </div>
-        <div class="model-list">
-          <div v-for="model in allModels" :key="model.id" class="model-row">
-            <div class="model-meta">
-              <span class="model-name">{{ model.name }}</span>
-              <span class="model-desc">{{ model.desc }}</span>
-            </div>
-            <label class="switch">
-              <input
-                type="checkbox"
-                :checked="enabledModels.includes(model.id)"
-                @change="toggleModel(model.id, $event.target.checked)"
-              />
-              <span class="slider"></span>
-            </label>
+      <!-- 계정 생성 -->
+      <div class="create-form">
+        <div class="form-row">
+          <div class="form-field">
+            <label>ID</label>
+            <input v-model.trim="newUser.username" type="text" placeholder="영문/숫자 3~50자" class="input" />
+          </div>
+          <div class="form-field">
+            <label>이름 (선택)</label>
+            <input v-model.trim="newUser.display_name" type="text" placeholder="표시 이름" class="input" />
           </div>
         </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label>비밀번호</label>
+            <input v-model="newUser.password" type="password" placeholder="8자 이상, 영문+숫자" class="input" autocomplete="new-password" />
+          </div>
+          <div class="form-field">
+            <label>권한</label>
+            <select v-model="newUser.role" class="input">
+              <option v-for="r in roles" :key="r.value" :value="r.value">{{ r.label }}</option>
+            </select>
+          </div>
+        </div>
+        <p class="role-hint">{{ roleDesc[newUser.role] }}</p>
         <div class="actions">
-          <button class="primary-btn" @click="saveEnabledModels" :disabled="saving">
-            {{ saving ? '저장 중...' : '활성화 설정 저장' }}
+          <button class="primary-btn" @click="submitCreate" :disabled="creating || !canCreate">
+            {{ creating ? '생성 중...' : '계정 생성' }}
           </button>
         </div>
       </div>
 
-      <!-- 패스워드 변경 -->
-      <div class="card">
-        <div class="card-title">
-          <span>🔑 관리자 패스워드 변경</span>
-        </div>
-        <div class="pw-form">
-          <input v-model="oldPw" type="password" placeholder="기존 패스워드" class="pw-input small" />
-          <input v-model="newPw" type="password" placeholder="새 패스워드 (4자 이상)" class="pw-input small" />
-          <button class="primary-btn" @click="changePassword" :disabled="!oldPw || !newPw">변경</button>
-        </div>
+      <!-- 계정 목록 -->
+      <div class="table-wrapper">
+        <table class="user-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>이름</th>
+              <th>권한</th>
+              <th>상태</th>
+              <th>최근 로그인</th>
+              <th class="col-actions">관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in users" :key="u.username" :class="{ inactive: !u.is_active }">
+              <td class="mono">
+                {{ u.username }}
+                <span v-if="u.username === myUsername" class="me-chip">나</span>
+              </td>
+              <td>{{ u.display_name || '-' }}</td>
+              <td>
+                <select
+                  :value="u.role"
+                  class="role-select"
+                  :disabled="u.username === myUsername"
+                  @change="changeRole(u, $event.target.value)"
+                >
+                  <option v-for="r in roles" :key="r.value" :value="r.value">{{ r.label }}</option>
+                </select>
+              </td>
+              <td>
+                <span class="status-chip" :class="u.is_active ? 'on' : 'off'">
+                  {{ u.is_active ? '활성' : '비활성' }}
+                </span>
+                <span v-if="u.must_change_pw" class="status-chip warn" title="최초 로그인 시 비밀번호 변경 필요">변경필요</span>
+              </td>
+              <td class="mono dim">{{ formatDate(u.last_login_at) }}</td>
+              <td class="col-actions">
+                <div class="row-actions">
+                  <button class="mini-btn" @click="resetPassword(u)">비밀번호 초기화</button>
+                  <button
+                    class="mini-btn"
+                    :disabled="u.username === myUsername"
+                    @click="toggleActive(u)"
+                  >{{ u.is_active ? '비활성화' : '활성화' }}</button>
+                  <button
+                    class="mini-btn danger"
+                    :disabled="u.username === myUsername"
+                    @click="removeUser(u)"
+                  >삭제</button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="users.length === 0">
+              <td colspan="6" class="empty">등록된 계정이 없습니다.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      <!-- 안내 -->
-      <div class="info-card">
-        <p>📌 Admin 모드에서는 <strong>작업 히스토리</strong> 메뉴에서 삭제 버튼이 활성화됩니다.</p>
-        <p>📌 일반 모드에서는 삭제 버튼이 비활성화되어 있습니다.</p>
+      <!-- 권한 설명 -->
+      <div class="role-legend">
+        <div v-for="r in roles" :key="r.value" class="legend-item">
+          <span class="legend-chip" :class="'chip-' + r.value">{{ shortLabel(r.value) }}</span>
+          <span class="legend-desc">{{ roleDesc[r.value] }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── LLM 모델 활성화 ───────── -->
+    <div class="card">
+      <div class="card-title">
+        <span>🤖 LLM 모델 활성화</span>
+        <span class="card-sub">비활성화된 모델은 일반 사용자에게 노출되지 않습니다.</span>
+      </div>
+      <div class="model-list">
+        <div v-for="model in allModels" :key="model.id" class="model-row">
+          <div class="model-meta">
+            <span class="model-name">{{ model.name }}</span>
+            <span class="model-desc">{{ model.desc }}</span>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="enabledModels.includes(model.id)"
+              @change="toggleModel(model.id, $event.target.checked)"
+            />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="primary-btn" @click="saveEnabledModels" :disabled="saving">
+          {{ saving ? '저장 중...' : '활성화 설정 저장' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- ───────── 내 비밀번호 변경 ───────── -->
+    <div class="card">
+      <div class="card-title">
+        <span>🔑 내 비밀번호 변경</span>
+        <span class="card-sub">8자 이상, 영문과 숫자를 조합하세요.</span>
+      </div>
+      <div class="pw-form">
+        <input v-model="oldPw" type="password" placeholder="기존 비밀번호" class="input" autocomplete="current-password" />
+        <input v-model="newPw" type="password" placeholder="새 비밀번호" class="input" autocomplete="new-password" />
+        <button class="primary-btn" @click="submitPasswordChange" :disabled="!oldPw || !newPw">변경</button>
       </div>
     </div>
   </div>
 </template>
 
 <script>
-import { adminLogin, changeAdminPassword, getEnabledModels, setEnabledModels } from '../api'
-
-const ADMIN_FLAG_KEY = 'sql_migrator_admin_authed'
+import {
+  getEnabledModels, setEnabledModels,
+  getUsers, createUser, updateUser, deleteUser, changeMyPassword
+} from '../api'
+import { auth, ROLE_ADMIN, ROLE_ACTOR, ROLE_VIEWER, ROLE_LABEL, ROLE_DESC } from '../auth'
 
 export default {
   name: 'AdminView',
   data() {
     return {
-      authenticated: false,
-      password: '',
-      loading: false,
-      errorMsg: '',
+      users: [],
+      creating: false,
+      newUser: { username: '', display_name: '', password: '', role: ROLE_VIEWER },
+      roles: [
+        { value: ROLE_ADMIN, label: 'Admin — 전체 관리' },
+        { value: ROLE_ACTOR, label: 'Actor — 환경 조회 + 쿼리 변환' },
+        { value: ROLE_VIEWER, label: 'Viewer — 이력 조회 전용' }
+      ],
+      roleDesc: ROLE_DESC,
       saving: false,
       oldPw: '',
       newPw: '',
@@ -106,40 +191,110 @@ export default {
       ]
     }
   },
-  mounted() {
-    this.authenticated = sessionStorage.getItem(ADMIN_FLAG_KEY) === '1'
-    if (this.authenticated) {
-      this.fetchEnabledModels()
-    } else {
-      this.$nextTick(() => this.$refs.pwInput && this.$refs.pwInput.focus())
+  computed: {
+    myUsername() {
+      return auth.user ? auth.user.username : ''
+    },
+    canCreate() {
+      return this.newUser.username && this.newUser.password && this.newUser.role
     }
   },
+  async mounted() {
+    await Promise.all([this.fetchUsers(), this.fetchEnabledModels()])
+  },
   methods: {
-    async login() {
-      this.errorMsg = ''
-      this.loading = true
+    shortLabel(role) {
+      return ROLE_LABEL[role] || role
+    },
+    formatDate(iso) {
+      if (!iso) return '-'
+      const d = new Date(iso)
+      if (Number.isNaN(d.getTime())) return '-'
+      const p = n => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+    },
+    errText(e, fallback) {
+      return e?.response?.data?.detail || e?.message || fallback
+    },
+
+    // ── 계정 관리 ──
+    async fetchUsers() {
       try {
-        const res = await adminLogin(this.password)
-        if (res.ok) {
-          sessionStorage.setItem(ADMIN_FLAG_KEY, '1')
-          window.dispatchEvent(new Event('admin-auth-changed'))
-          this.authenticated = true
-          this.password = ''
-          await this.fetchEnabledModels()
-        } else {
-          this.errorMsg = res.message || '패스워드가 일치하지 않습니다.'
-        }
+        const res = await getUsers()
+        this.users = res.users || []
       } catch (e) {
-        this.errorMsg = '인증 중 오류가 발생했습니다.'
-      } finally {
-        this.loading = false
+        console.error('Failed to fetch users:', e)
       }
     },
-    logout() {
-      sessionStorage.removeItem(ADMIN_FLAG_KEY)
-      window.dispatchEvent(new Event('admin-auth-changed'))
-      this.authenticated = false
+
+    async submitCreate() {
+      this.creating = true
+      try {
+        await createUser({
+          username: this.newUser.username,
+          password: this.newUser.password,
+          role: this.newUser.role,
+          display_name: this.newUser.display_name || null
+        })
+        alert(`계정 '${this.newUser.username}'이 생성되었습니다.\n최초 로그인 시 비밀번호 변경이 요구됩니다.`)
+        this.newUser = { username: '', display_name: '', password: '', role: ROLE_VIEWER }
+        await this.fetchUsers()
+      } catch (e) {
+        alert('계정 생성 실패: ' + this.errText(e, '알 수 없는 오류'))
+      } finally {
+        this.creating = false
+      }
     },
+
+    async changeRole(user, role) {
+      if (role === user.role) return
+      if (!confirm(`'${user.username}'의 권한을 ${this.shortLabel(role)}(으)로 변경하시겠습니까?`)) {
+        await this.fetchUsers()
+        return
+      }
+      try {
+        await updateUser(user.username, { role })
+        await this.fetchUsers()
+      } catch (e) {
+        alert('권한 변경 실패: ' + this.errText(e, '알 수 없는 오류'))
+        await this.fetchUsers()
+      }
+    },
+
+    async toggleActive(user) {
+      const next = !user.is_active
+      if (!confirm(`'${user.username}' 계정을 ${next ? '활성화' : '비활성화'}하시겠습니까?`)) return
+      try {
+        await updateUser(user.username, { is_active: next })
+        await this.fetchUsers()
+      } catch (e) {
+        alert('상태 변경 실패: ' + this.errText(e, '알 수 없는 오류'))
+      }
+    },
+
+    async resetPassword(user) {
+      const pw = prompt(`'${user.username}'의 새 비밀번호를 입력하세요.\n(8자 이상, 영문+숫자 조합)`)
+      if (!pw) return
+      try {
+        await updateUser(user.username, { new_password: pw })
+        alert('비밀번호가 초기화되었습니다. 해당 사용자는 최초 로그인 시 변경해야 합니다.')
+        await this.fetchUsers()
+      } catch (e) {
+        alert('초기화 실패: ' + this.errText(e, '알 수 없는 오류'))
+      }
+    },
+
+    async removeUser(user) {
+      if (!confirm(`'${user.username}' 계정을 삭제하시겠습니까? 되돌릴 수 없습니다.`)) return
+      try {
+        await deleteUser(user.username)
+        await this.fetchUsers()
+      } catch (e) {
+        alert('삭제 실패: ' + this.errText(e, '알 수 없는 오류'))
+      }
+    },
+
+    // ── 모델 활성화 ──
     async fetchEnabledModels() {
       try {
         const res = await getEnabledModels()
@@ -165,23 +320,21 @@ export default {
         await setEnabledModels(this.enabledModels)
         alert('활성화 설정이 저장되었습니다.')
       } catch (e) {
-        alert('저장 실패: ' + (e?.response?.data?.detail || e.message))
+        alert('저장 실패: ' + this.errText(e, '알 수 없는 오류'))
       } finally {
         this.saving = false
       }
     },
-    async changePassword() {
-      if (this.newPw.length < 4) {
-        alert('새 패스워드는 4자 이상이어야 합니다.')
-        return
-      }
+
+    // ── 내 비밀번호 ──
+    async submitPasswordChange() {
       try {
-        await changeAdminPassword(this.oldPw, this.newPw)
-        alert('패스워드가 변경되었습니다.')
+        await changeMyPassword(this.oldPw, this.newPw)
+        alert('비밀번호가 변경되었습니다.')
         this.oldPw = ''
         this.newPw = ''
       } catch (e) {
-        alert('변경 실패: ' + (e?.response?.data?.detail || e.message))
+        alert('변경 실패: ' + this.errText(e, '알 수 없는 오류'))
       }
     }
   }
@@ -190,78 +343,8 @@ export default {
 
 <style scoped>
 .admin-view {
-  max-width: 800px;
+  max-width: 960px;
   margin: 0 auto;
-}
-
-.login-card {
-  max-width: 420px;
-  margin: 80px auto;
-  background: white;
-  border-radius: 14px;
-  padding: 40px 32px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-  text-align: center;
-}
-
-.login-icon { font-size: 44px; margin-bottom: 12px; }
-
-.login-card h2 {
-  margin: 0 0 8px;
-  color: #1e293b;
-}
-
-.login-desc {
-  color: #64748b;
-  margin-bottom: 24px;
-  font-size: 14px;
-}
-
-.pw-input {
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  font-size: 15px;
-  margin-bottom: 12px;
-  box-sizing: border-box;
-}
-
-.pw-input:focus {
-  outline: none;
-  border-color: #6366f1;
-}
-
-.pw-input.small {
-  margin-bottom: 0;
-  flex: 1;
-}
-
-.login-btn, .primary-btn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  padding: 12px 22px;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  width: 100%;
-  font-size: 15px;
-}
-
-.primary-btn {
-  width: auto;
-}
-
-.login-btn:disabled, .primary-btn:disabled {
-  background: #cbd5e1;
-  cursor: not-allowed;
-}
-
-.error-msg {
-  color: #dc2626;
-  margin-top: 14px;
-  font-size: 13px;
 }
 
 .page-header {
@@ -278,19 +361,7 @@ export default {
   margin: 0 0 4px;
 }
 
-.page-desc { color: #7f8c8d; }
-
-.logout-btn {
-  background: #f1f5f9;
-  border: none;
-  color: #475569;
-  padding: 8px 16px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.logout-btn:hover { background: #e2e8f0; }
+.page-desc { color: #7f8c8d; margin: 0; }
 
 .card {
   background: white;
@@ -316,6 +387,216 @@ export default {
   font-weight: 400;
 }
 
+/* ── 계정 생성 폼 ── */
+.create-form {
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 22px;
+}
+
+.form-row {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.form-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.input {
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.role-hint {
+  font-size: 12px;
+  color: #64748b;
+  margin: 4px 0 12px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.primary-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.primary-btn:disabled {
+  background: #cbd5e1;
+  cursor: not-allowed;
+}
+
+/* ── 계정 테이블 ── */
+.table-wrapper {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.user-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.user-table th {
+  background: #f8fafc;
+  text-align: left;
+  padding: 11px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.user-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 13px;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+.user-table tr:last-child td { border-bottom: none; }
+.user-table tr.inactive { background: #fafafa; color: #94a3b8; }
+
+.mono { font-family: 'Fira Code', 'Courier New', monospace; }
+.dim { color: #94a3b8; font-size: 12px; }
+.empty { text-align: center; color: #94a3b8; padding: 24px; }
+.col-actions { width: 1%; white-space: nowrap; }
+
+.me-chip {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  background: #e0e7ff;
+  color: #4338ca;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.role-select {
+  padding: 5px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  background: white;
+  cursor: pointer;
+}
+
+.role-select:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.status-chip {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-right: 4px;
+}
+
+.status-chip.on { background: #dcfce7; color: #15803d; }
+.status-chip.off { background: #f1f5f9; color: #64748b; }
+.status-chip.warn { background: #fef3c7; color: #92400e; }
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.mini-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mini-btn:hover:not(:disabled) { background: #e2e8f0; }
+
+.mini-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.mini-btn.danger { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
+.mini-btn.danger:hover:not(:disabled) { background: #fee2e2; }
+
+/* ── 권한 설명 ── */
+.role-legend {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #0c4a6e;
+}
+
+.legend-chip {
+  flex-shrink: 0;
+  width: 58px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 0;
+  border-radius: 999px;
+}
+
+.chip-admin { background: #fee2e2; color: #b91c1c; }
+.chip-actor { background: #e0e7ff; color: #4338ca; }
+.chip-viewer { background: #e2e8f0; color: #475569; }
+
+/* ── 모델 목록 ── */
 .model-list {
   display: flex;
   flex-direction: column;
@@ -338,17 +619,9 @@ export default {
   gap: 3px;
 }
 
-.model-name {
-  font-weight: 600;
-  color: #1e293b;
-}
+.model-name { font-weight: 600; color: #1e293b; }
+.model-desc { font-size: 12px; color: #94a3b8; }
 
-.model-desc {
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-/* Toggle switch */
 .switch {
   position: relative;
   display: inline-block;
@@ -380,27 +653,12 @@ export default {
 .switch input:checked + .slider { background: #6366f1; }
 .switch input:checked + .slider:before { transform: translateX(20px); }
 
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  border-top: 1px solid #f1f5f9;
-  padding-top: 16px;
-}
-
+/* ── 비밀번호 폼 ── */
 .pw-form {
   display: flex;
   gap: 10px;
   align-items: center;
 }
 
-.info-card {
-  background: #f0f9ff;
-  border: 1px solid #bae6fd;
-  border-radius: 10px;
-  padding: 16px 20px;
-  color: #0c4a6e;
-  font-size: 13px;
-}
-
-.info-card p { margin: 4px 0; }
+.pw-form .input { flex: 1; }
 </style>

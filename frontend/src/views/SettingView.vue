@@ -7,15 +7,20 @@
       :sub-message="loadingSubMessage"
     />
 
-    <h2 class="page-title">프로젝트 설정</h2>
-    <p class="page-desc">프로젝트 정보와 대상 PostgreSQL 접속 정보를 관리합니다.</p>
+    <h2 class="page-title">
+      프로젝트 설정
+      <span v-if="!isAdmin" class="readonly-badge">읽기 전용</span>
+    </h2>
+    <p class="page-desc">
+      프로젝트 정보와 대상 PostgreSQL 접속 정보를 관리합니다.{{ isAdmin ? '' : ' 등록/수정/삭제는 Admin 권한이 필요합니다.' }}
+    </p>
 
     <div class="setting-layout">
       <!-- 프로젝트 목록 -->
       <div class="project-list-section">
         <div class="section-header">
           <h3 class="section-title">프로젝트 목록</h3>
-          <button class="btn btn-sm btn-primary" @click="showNewForm" :disabled="listLoading">
+          <button v-if="isAdmin" class="btn btn-sm btn-primary" @click="showNewForm" :disabled="listLoading">
             + 새 프로젝트
           </button>
         </div>
@@ -48,6 +53,7 @@
               <span class="project-db">{{ proj.db_config_summary }}</span>
             </div>
             <button
+              v-if="isAdmin"
               class="btn-delete"
               @click.stop="handleDelete(proj.project_id)"
               title="삭제"
@@ -59,9 +65,10 @@
 
         <div class="empty-list" v-else>
           <p>등록된 프로젝트가 없습니다.</p>
-          <button class="btn btn-primary" @click="showNewForm">
+          <button v-if="isAdmin" class="btn btn-primary" @click="showNewForm">
             첫 프로젝트 등록하기
           </button>
+          <p v-else class="empty-hint">Admin에게 프로젝트 등록을 요청하세요.</p>
         </div>
       </div>
 
@@ -204,6 +211,7 @@
             <!-- 버튼 -->
             <div class="form-actions">
               <button
+                v-if="isAdmin"
                 type="button"
                 class="btn btn-secondary"
                 @click="handleTestConnection"
@@ -212,6 +220,7 @@
                 <span v-if="testingConnection" class="btn-spinner"></span>
                 {{ testingConnection ? '테스트 중...' : 'DB 연결 테스트' }}
               </button>
+              <span v-else></span>
 
               <div class="action-right">
                 <button
@@ -223,6 +232,7 @@
                   닫기
                 </button>
                 <button
+                  v-if="isAdmin"
                   type="submit"
                   class="btn btn-primary"
                   :disabled="loading || testingConnection"
@@ -274,6 +284,7 @@ import {
   deleteProject,
   testConnection
 } from '../api/index.js'
+import { can, ROLE_ADMIN } from '../auth'
 
 export default {
   name: 'SettingView',
@@ -299,6 +310,11 @@ export default {
       loadingMessage: '처리 중...',
       loadingSubMessage: '',
       message: { type: '', text: '' }
+    }
+  },
+  computed: {
+    isAdmin() {
+      return can(ROLE_ADMIN)
     }
   },
   mounted() {
@@ -501,6 +517,23 @@ export default {
 </script>
 
 <style scoped>
+.readonly-badge {
+  display: inline-block;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.empty-hint {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
 .setting-view {
   max-width: 1000px;
 }

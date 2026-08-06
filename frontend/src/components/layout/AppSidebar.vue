@@ -9,15 +9,15 @@
 
       <div class="nav-divider"></div>
 
-      <router-link to="/setting" class="nav-item" :class="{ active: $route.path === '/setting' }">
+      <router-link v-if="isActor" to="/setting" class="nav-item" :class="{ active: $route.path === '/setting' }">
         <span class="nav-icon">&#9881;</span>
         <span class="nav-text">프로젝트 설정</span>
       </router-link>
-      <router-link to="/global-settings" class="nav-item" :class="{ active: $route.path === '/global-settings' }">
+      <router-link v-if="isActor" to="/global-settings" class="nav-item" :class="{ active: $route.path === '/global-settings' }">
         <span class="nav-icon">&#127760;</span>
         <span class="nav-text">전역 설정</span>
       </router-link>
-      <router-link to="/convert" class="nav-item" :class="{ active: $route.path === '/convert' }">
+      <router-link v-if="isActor" to="/convert" class="nav-item" :class="{ active: $route.path === '/convert' }">
         <span class="nav-icon">&#8644;</span>
         <span class="nav-text">쿼리 변환</span>
       </router-link>
@@ -25,15 +25,23 @@
         <span class="nav-icon">&#128203;</span>
         <span class="nav-text">작업 히스토리</span>
       </router-link>
+
+      <template v-if="isAdmin">
+        <div class="nav-divider"></div>
+        <router-link to="/admin" class="nav-item nav-admin" :class="{ active: $route.path === '/admin' }">
+          <span class="nav-icon">&#128737;</span>
+          <span class="nav-text">관리자</span>
+        </router-link>
+      </template>
     </nav>
 
     <div class="sidebar-footer">
-      <div v-if="isAdmin" class="admin-status">
-        <div class="admin-badge">
-          <span class="admin-dot"></span>
-          <span class="admin-label">ADMIN 모드</span>
+      <div v-if="user" class="user-status" :class="'role-' + user.role">
+        <div class="user-line">
+          <span class="user-name">{{ user.display_name || user.username }}</span>
+          <span class="role-chip">{{ roleLabel }}</span>
         </div>
-        <button class="admin-logout" @click="adminLogout">로그아웃</button>
+        <button class="logout-btn" @click="logout">로그아웃</button>
       </div>
       <p class="footer-text">Oracle to PostgreSQL</p>
     </div>
@@ -41,42 +49,29 @@
 </template>
 
 <script>
-const ADMIN_FLAG_KEY = 'sql_migrator_admin_authed'
+import { auth, clearSession, can, ROLE_ADMIN, ROLE_ACTOR, ROLE_LABEL } from '../../auth'
 
 export default {
   name: 'AppSidebar',
-  data() {
-    return {
-      isAdmin: false
-    }
-  },
-  mounted() {
-    this.refreshAdminFlag()
-    window.addEventListener('storage', this.refreshAdminFlag)
-    window.addEventListener('admin-auth-changed', this.refreshAdminFlag)
-  },
-  beforeUnmount() {
-    window.removeEventListener('storage', this.refreshAdminFlag)
-    window.removeEventListener('admin-auth-changed', this.refreshAdminFlag)
-  },
-  watch: {
-    $route() {
-      this.refreshAdminFlag()
+  computed: {
+    user() {
+      return auth.user
+    },
+    roleLabel() {
+      return ROLE_LABEL[auth.user?.role] || auth.user?.role || ''
+    },
+    isAdmin() {
+      return can(ROLE_ADMIN)
+    },
+    isActor() {
+      return can(ROLE_ACTOR)
     }
   },
   methods: {
-    refreshAdminFlag() {
-      this.isAdmin = sessionStorage.getItem(ADMIN_FLAG_KEY) === '1'
-    },
-    adminLogout() {
-      if (!confirm('Admin 모드에서 로그아웃하시겠습니까?')) return
-      sessionStorage.removeItem(ADMIN_FLAG_KEY)
-      this.isAdmin = false
-      window.dispatchEvent(new Event('admin-auth-changed'))
-      if (this.$route.path === '/admin') {
-        // AdminView가 다시 패스워드 화면으로 전환되도록 트리거
-        this.$router.replace('/admin')
-      }
+    logout() {
+      if (!confirm('로그아웃하시겠습니까?')) return
+      clearSession()
+      this.$router.replace('/login')
     }
   }
 }
@@ -154,43 +149,75 @@ export default {
   border-top: 1px solid rgba(255,255,255,0.1);
 }
 
-.admin-status {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.35);
+/* 관리자 메뉴 */
+.nav-admin {
+  color: #fca5a5;
+}
+
+.nav-admin:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+}
+
+.nav-admin.active {
+  background: rgba(239, 68, 68, 0.3);
+  color: white;
+  border-left: 3px solid #ef4444;
+}
+
+/* 사용자 정보 박스 */
+.user-status {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 14px;
 }
 
-.admin-badge {
+.user-status.role-admin {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.user-line {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   margin-bottom: 8px;
 }
 
-.admin-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ef4444;
-  box-shadow: 0 0 6px #ef4444;
-  animation: pulse 1.6s ease-in-out infinite;
+.user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.admin-label {
-  font-size: 11px;
+.role-chip {
+  flex-shrink: 0;
+  font-size: 10px;
   font-weight: 700;
-  color: #fecaca;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.25);
+  color: #cbd5e1;
 }
 
-.admin-logout {
+.role-admin .role-chip {
+  background: rgba(239, 68, 68, 0.3);
+  color: #fecaca;
+}
+
+.role-actor .role-chip {
+  background: rgba(99, 102, 241, 0.3);
+  color: #c7d2fe;
+}
+
+.logout-btn {
   width: 100%;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -203,7 +230,7 @@ export default {
   transition: all 0.2s;
 }
 
-.admin-logout:hover {
+.logout-btn:hover {
   background: rgba(239, 68, 68, 0.25);
   border-color: rgba(239, 68, 68, 0.5);
 }

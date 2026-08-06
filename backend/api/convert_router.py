@@ -2,11 +2,11 @@
 Interface B — 쿼리 변환 메인 로직 라우터
 """
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 import json
-import asyncio
 
+from backend.api.deps import CurrentUser, require_actor, require_admin, require_viewer
 from backend.schemas.convert import ConvertRequest, ConvertResponse
 from backend.services import convert_service, history_service
 from backend.services import database
@@ -17,20 +17,22 @@ router = APIRouter(prefix="/api", tags=["쿼리 변환 (Interface B)"])
 
 
 @router.post("/convert", response_model=ConvertResponse)
-async def convert_queries(req: ConvertRequest):
+async def convert_queries(req: ConvertRequest, user: CurrentUser = Depends(require_actor)):
     """
-    XML 파일 단위 쿼리 변환 (기존 동기식 API)
+    XML 파일 단위 쿼리 변환 (기존 동기식 API) — Actor 이상
     """
+    logger.info("[API] POST /api/convert — user=%s", user["username"])
     return convert_service.process_conversion(req)
 
 
 @router.post("/convert-stream")
-async def convert_queries_stream(req: ConvertRequest):
+async def convert_queries_stream(req: ConvertRequest, user: CurrentUser = Depends(require_actor)):
     """
-    실시간 진행 상황을 스트리밍하는 변환 API (SSE 스타일)
+    실시간 진행 상황을 스트리밍하는 변환 API (SSE 스타일) — Actor 이상
     """
     logger.info(
-        "[API] POST /api/convert-stream — project=%s, file=%s, queries=%d",
+        "[API] POST /api/convert-stream — user=%s, project=%s, file=%s, queries=%d",
+        user["username"],
         req.project_id,
         req.xml_file_name,
         len(req.queries),
@@ -55,45 +57,44 @@ async def convert_queries_stream(req: ConvertRequest):
     )
 
 
-@router.get("/history")
+@router.get("/history", dependencies=[Depends(require_viewer)])
 async def get_history():
-    """작업 히스토리 계층 구조 조회"""
+    """작업 히스토리 계층 구조 조회 — 로그인한 모든 사용자"""
     return {
         "status": "success",
         "data": history_service.get_history_hierarchy()
     }
 
 
-@router.get("/history/list")
+@router.get("/history/list", dependencies=[Depends(require_viewer)])
 async def get_history_flat():
-    """작업 히스토리 전체 목록 최신순 조회"""
+    """작업 히스토리 전체 목록 최신순 조회 — 로그인한 모든 사용자"""
     return {
         "status": "success",
         "data": history_service.get_history_list()
     }
 
 
-@router.get("/history/{conversion_id}")
+@router.get("/history/{conversion_id}", dependencies=[Depends(require_viewer)])
 async def get_history_detail(conversion_id: int):
-    """특정 변환 히스토리 상세 조회"""
+    """특정 변환 히스토리 상세 조회 — 로그인한 모든 사용자"""
     try:
         conn = database.get_connection()
-        cur = conn.cursor(cursor_factory=database.RealDictCursor)
+        # with 블록으로 예외 경로에서도 커서가 닫히도록 보장
+        with conn.cursor(cursor_factory=database.RealDictCursor) as cur:
+            # 마스터 정보
+            cur.execute("SELECT * FROM conversions WHERE conversion_id = %s", (conversion_id,))
+            master = cur.fetchone()
+            if not master:
+                raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
 
-        # 마스터 정보
-        cur.execute("SELECT * FROM conversions WHERE conversion_id = %s", (conversion_id,))
-        master = cur.fetchone()
-        if not master:
-            raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
-
-        # 상세 쿼리 결과
-        cur.execute("""
-            SELECT * FROM query_conversions 
-            WHERE conversion_id = %s 
-            ORDER BY detail_id
-        """, (conversion_id,))
-        queries = cur.fetchall()
-        cur.close()
+            # 상세 쿼리 결과
+            cur.execute("""
+                SELECT * FROM query_conversions
+                WHERE conversion_id = %s
+                ORDER BY detail_id
+            """, (conversion_id,))
+            queries = cur.fetchall()
 
         # 데이터 가공 (JSON 필드 파싱)
         formatted_queries = []
@@ -118,14 +119,16 @@ async def get_history_detail(conversion_id: int):
                 "queries": formatted_queries
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("[History] 상세 조회 실패: %s", str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="히스토리 조회 중 오류가 발생했습니다.")
 
 
-@router.delete("/history/{conversion_id}")
+@router.delete("/history/{conversion_id}", dependencies=[Depends(require_admin)])
 async def delete_history(conversion_id: int):
-    """특정 변환 히스토리 삭제 (하위 query_conversions 포함)"""
+    """특정 변환 히스토리 삭제 (하위 query_conversions 포함) — Admin 전용"""
     try:
         conn = database.get_connection()
         cur = conn.cursor()
@@ -145,4 +148,4 @@ async def delete_history(conversion_id: int):
         raise
     except Exception as e:
         logger.error("[History] 히스토리 삭제 실패: %s", str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="히스토리 삭제 중 오류가 발생했습니다.")

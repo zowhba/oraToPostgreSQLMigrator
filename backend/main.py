@@ -10,16 +10,19 @@ import time
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from starlette.responses import StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.responses import Response
 import uvicorn
 
 # 모듈 경로 조정 (프로젝트 루트에서 실행 시)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from backend.api.auth_router import router as auth_router
+from backend.api.deps import require_admin
 from backend.api.project_router import router as project_router
 from backend.api.convert_router import router as convert_router
 from backend.api.settings_router import router as settings_router
@@ -68,12 +71,32 @@ app = FastAPI(
     ),
     version="2.0.0",
     lifespan=lifespan,
+    # API 문서는 전체 엔드포인트 구조를 노출하므로 기본 비활성화
+    # (필요 시 ENABLE_API_DOCS=true)
+    docs_url="/docs" if Config.ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if Config.ENABLE_API_DOCS else None,
+    openapi_url="/openapi.json" if Config.ENABLE_API_DOCS else None,
 )
 
+
+# ── 검증 오류 응답 (입력값 원문 제거) ──
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    기본 핸들러는 오류 항목에 input(입력 원문)을 포함시켜
+    비밀번호가 응답·로그에 평문으로 남습니다. 해당 필드를 제거합니다.
+    """
+    safe_errors = [
+        {k: v for k, v in err.items() if k not in ("input", "ctx", "url")}
+        for err in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": safe_errors})
+
 # ── CORS 설정 (FE 연동) ──
+# 인증 토큰을 다루므로 와일드카드 대신 허용 오리진을 명시합니다.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=Config.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -85,6 +108,27 @@ def _truncate(text: str, max_len: int = 2000) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len] + f"... (총 {len(text)}자, {max_len}자까지 표시)"
+
+
+# 로그에 평문으로 남으면 안 되는 필드 (비밀번호/토큰류)
+_SENSITIVE_FIELDS = {
+    "password", "old_password", "new_password", "pw", "db_pw",
+    "access_token", "token", "authorization", "jwt_secret", "password_hash",
+    "api_key", "secret",
+}
+_MASK = "***REDACTED***"
+
+
+def _mask_sensitive(obj):
+    """요청/응답 본문에서 민감 필드를 재귀적으로 마스킹합니다."""
+    if isinstance(obj, dict):
+        return {
+            k: (_MASK if k.lower() in _SENSITIVE_FIELDS else _mask_sensitive(v))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_mask_sensitive(v) for v in obj]
+    return obj
 
 
 @app.middleware("http")
@@ -101,9 +145,13 @@ async def log_request_response(request: Request, call_next):
         body_bytes = await request.body()
         try:
             req_json = json.loads(body_bytes)
-            req_body = json.dumps(req_json, ensure_ascii=False, indent=2)
+            req_body = json.dumps(_mask_sensitive(req_json), ensure_ascii=False, indent=2)
         except Exception:
-            req_body = body_bytes.decode("utf-8", errors="replace")
+            # JSON 파싱 실패 시 본문에 자격증명이 섞여 있을 수 있으므로 인증 경로는 기록하지 않음
+            req_body = (
+                "(non-JSON body omitted)" if path.startswith("/api/auth")
+                else body_bytes.decode("utf-8", errors="replace")
+            )
 
     logger.info(
         "──── REQUEST ────\n%s %s\nBody:\n%s",
@@ -117,10 +165,12 @@ async def log_request_response(request: Request, call_next):
     elapsed = time.time() - start
 
     # 스트리밍 및 SSE 응답인 경우 본문 로깅 절대 금지 (버퍼링 방지)
-    # media_type 체크 외에 URL 경로로도 강력하게 필터링
+    # BaseHTTPMiddleware 하위에서는 response.media_type이 항상 None이므로
+    # 실제 content-type 헤더와 URL 경로로 판별한다.
+    content_type = response.headers.get("content-type", "")
     is_streaming = (
-        "text/event-stream" in (response.media_type or "") or 
-        "application/x-ndjson" in (response.media_type or "") or
+        "text/event-stream" in content_type or
+        "application/x-ndjson" in content_type or
         request.url.path.endswith("/convert-stream")
     )
     
@@ -139,7 +189,7 @@ async def log_request_response(request: Request, call_next):
 
     try:
         resp_json = json.loads(resp_bytes)
-        resp_body = json.dumps(resp_json, ensure_ascii=False, indent=2)
+        resp_body = json.dumps(_mask_sensitive(resp_json), ensure_ascii=False, indent=2)
     except Exception:
         resp_body = resp_bytes.decode("utf-8", errors="replace")
 
@@ -149,20 +199,45 @@ async def log_request_response(request: Request, call_next):
     )
 
     # body_iterator가 소비되었으므로 새 응답 생성
-    return StreamingResponse(
-        iter([resp_bytes]),
+    # dict(headers)는 Set-Cookie 등 중복 헤더를 잃으므로 raw_headers를 그대로 승계
+    new_response = Response(
+        content=resp_bytes,
         status_code=response.status_code,
-        headers=dict(response.headers),
         media_type=response.media_type,
     )
+    preserved = [(k, v) for k, v in response.raw_headers if k.lower() != b"content-length"]
+    preserved.append((b"content-length", str(len(resp_bytes)).encode()))
+    new_response.raw_headers = preserved
+    return new_response
 
 
 # ── 라우터 등록 ──
+app.include_router(auth_router)
 app.include_router(project_router)
 app.include_router(convert_router)
 app.include_router(settings_router)
 
+@app.get("/health", tags=["Health"])
+async def health():
+    """헬스 체크 (미인증 접근 가능하므로 내부 설정값은 노출하지 않음)"""
+    return {"status": "healthy"}
+
+
+@app.get("/api/health", tags=["Health"])
+async def health_detail(user=Depends(require_admin)):
+    """상세 헬스 체크 — Admin 전용"""
+    return {
+        "status": "healthy",
+        "ai_endpoint": Config.AI_ENDPOINT[:30] + "..." if Config.AI_ENDPOINT else None,
+        "ai_model": Config.AI_DEPLOY_MODEL,
+        "ai_config_ready": Config.validate_ai_config(),
+        "mock_mode": Config.LLM_MOCK_MODE,
+        "version": "2.0.0",
+    }
+
+
 # ── 프론트엔드 정적 파일 서빙 (프로덕션) ──
+# catch-all은 반드시 마지막에 등록 (/health 등 상위 라우트가 가려지지 않도록)
 FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
 if os.path.isdir(FRONTEND_DIST):
     app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
@@ -171,29 +246,15 @@ if os.path.isdir(FRONTEND_DIST):
     async def serve_frontend(full_path: str):
         index = os.path.join(FRONTEND_DIST, "index.html")
         return FileResponse(index)
-
-
-@app.get("/", tags=["Health"])
-async def root():
-    """서버 상태 확인"""
-    return {
-        "status": "running",
-        "message": "AI 쿼리 변환 시스템 Backend API가 가동 중입니다.",
-        "version": "2.0.0",
-        "ai_config_ready": Config.validate_ai_config(),
-        "mock_mode": Config.LLM_MOCK_MODE,
-    }
-
-
-@app.get("/health", tags=["Health"])
-async def health():
-    """상세 헬스 체크"""
-    return {
-        "status": "healthy",
-        "ai_endpoint": Config.AI_ENDPOINT[:30] + "..." if Config.AI_ENDPOINT else None,
-        "ai_model": Config.AI_DEPLOY_MODEL,
-        "mock_mode": Config.LLM_MOCK_MODE,
-    }
+else:
+    @app.get("/", tags=["Health"])
+    async def root():
+        """서버 상태 확인"""
+        return {
+            "status": "running",
+            "message": "AI 쿼리 변환 시스템 Backend API가 가동 중입니다.",
+            "version": "2.0.0",
+        }
 
 
 if __name__ == "__main__":

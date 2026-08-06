@@ -12,7 +12,24 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 os.environ["LLM_MOCK_MODE"] = "true"
 
 from backend.main import app
+from backend.api import deps
 from backend.services import database as app_db
+from backend.services.auth_service import ROLE_ADMIN, ROLE_ACTOR, ROLE_VIEWER
+
+
+def _fake_user(role: str = ROLE_ADMIN):
+    return {
+        "username": f"test_{role}",
+        "role": role,
+        "role_label": role,
+        "display_name": f"테스트 {role}",
+        "is_active": True,
+        "must_change_pw": False,
+        "created_by": "test",
+        "last_login_at": None,
+        "created_at": None,
+        "updated_at": None,
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +56,35 @@ def _clear_project_store():
 
 @pytest.fixture
 def client():
-    """FastAPI TestClient fixture"""
+    """FastAPI TestClient — 기본적으로 Admin 권한으로 인증된 상태"""
+    app.dependency_overrides[deps.get_current_user] = lambda: _fake_user(ROLE_ADMIN)
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client_as():
+    """
+    지정한 권한으로 인증된 TestClient를 만드는 팩토리.
+
+        def test_x(client_as):
+            c = client_as('viewer')
+            assert c.get('/api/settings').status_code == 403
+    """
+    def _factory(role: str = ROLE_ACTOR):
+        app.dependency_overrides[deps.get_current_user] = lambda: _fake_user(role)
+        return TestClient(app)
+
+    yield _factory
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def anon_client():
+    """미인증 TestClient (401/403 검증용)"""
+    app.dependency_overrides.clear()
     return TestClient(app)
 
 

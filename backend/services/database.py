@@ -187,13 +187,6 @@ def init_tables():
         ON CONFLICT (setting_key) DO NOTHING
     """, (default_prompt,))
 
-    # Admin 패스워드 (초기값: 8838)
-    cur.execute("""
-        INSERT INTO app_settings (setting_key, setting_value)
-        VALUES ('admin_password', '8838')
-        ON CONFLICT (setting_key) DO NOTHING
-    """)
-
     # 활성화된 LLM 모델 목록 (JSON 배열) - 기본은 모든 모델 활성화
     cur.execute("""
         INSERT INTO app_settings (setting_key, setting_value)
@@ -201,8 +194,73 @@ def init_tables():
         ON CONFLICT (setting_key) DO NOTHING
     """)
 
+    # ─────────────────────────────────────────────
+    # 계정/권한 테이블
+    # ─────────────────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            username       VARCHAR(50) PRIMARY KEY,
+            password_hash  TEXT        NOT NULL,
+            role           VARCHAR(20) NOT NULL DEFAULT 'viewer',
+            display_name   VARCHAR(100),
+            is_active      BOOLEAN     NOT NULL DEFAULT TRUE,
+            must_change_pw BOOLEAN     NOT NULL DEFAULT FALSE,
+            created_by     VARCHAR(50),
+            last_login_at  TIMESTAMP,
+            created_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check
+    """)
+    cur.execute("""
+        ALTER TABLE users ADD CONSTRAINT users_role_check
+        CHECK (role IN ('admin', 'actor', 'viewer'))
+    """)
+
     cur.close()
+    _bootstrap_auth()
     logger.info("[AppDB] 테이블 초기화 완료")
+
+
+def _bootstrap_auth():
+    """
+    최초 admin 계정 시드 및 레거시 평문 admin_password 마이그레이션.
+
+    - app_settings에 평문 'admin_password'가 남아 있으면 해시하여 users('admin')로 이관 후 삭제
+    - 아무것도 없으면 기본값 '8838'로 admin 계정 생성 (최초 로그인 시 변경 유도)
+    """
+    # 순환 import 방지를 위해 지연 import
+    from backend.services import auth_service
+
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        admin_count = cur.fetchone()[0]
+
+        cur.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'admin_password'")
+        row = cur.fetchone()
+        legacy_pw = row[0] if row else None
+
+        if admin_count == 0:
+            seed_pw = legacy_pw or '8838'
+            cur.execute("""
+                INSERT INTO users (username, password_hash, role, display_name,
+                                   must_change_pw, created_by)
+                VALUES (%s, %s, 'admin', %s, TRUE, 'system')
+                ON CONFLICT (username) DO NOTHING
+            """, ('admin', auth_service.hash_password(seed_pw), '시스템 관리자'))
+            logger.warning(
+                "[Auth] 초기 admin 계정을 생성했습니다 (username=admin). "
+                "%s 최초 로그인 후 반드시 비밀번호를 변경하세요.",
+                "기존 관리자 패스워드를 이관했습니다." if legacy_pw else "초기 패스워드는 '8838'입니다.",
+            )
+
+        # 평문 패스워드는 어떤 경우에도 DB에 남기지 않는다
+        if legacy_pw is not None:
+            cur.execute("DELETE FROM app_settings WHERE setting_key = 'admin_password'")
+            logger.info("[Auth] 레거시 평문 admin_password 설정을 제거했습니다.")
 
 
 def close():

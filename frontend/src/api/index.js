@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getToken, clearSession } from '../auth'
 
 // Mock 모드 설정 (Backend 연동 전까지 true)
 const USE_MOCK = false
@@ -52,6 +53,82 @@ const api = axios.create({
     'Content-Type': 'application/json'
   }
 })
+
+// ============================================
+// 인증 인터셉터
+// ============================================
+
+/** 모든 요청에 Bearer 토큰 부착 */
+function attachToken(config) {
+  const token = getToken()
+  if (token) {
+    config.headers = config.headers || {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+}
+
+api.interceptors.request.use(attachToken)
+// GlobalSettingsView / App.vue 등 전역 axios를 직접 쓰는 호출도 함께 보호
+axios.interceptors.request.use(attachToken)
+
+/** 401/403 공통 처리 */
+function handleAuthError(error) {
+  const status = error?.response?.status
+  if (status === 401) {
+    clearSession()
+    const current = window.location.pathname + window.location.search
+    if (!current.startsWith('/login')) {
+      window.location.replace(`/login?redirect=${encodeURIComponent(current)}`)
+    }
+  }
+  return Promise.reject(error)
+}
+
+api.interceptors.response.use(r => r, handleAuthError)
+axios.interceptors.response.use(r => r, handleAuthError)
+
+// ============================================
+// 인증 / 계정 관리 API
+// ============================================
+
+export async function login(username, password) {
+  const response = await api.post('/auth/login', { username, password })
+  return response.data
+}
+
+export async function fetchMe() {
+  const response = await api.get('/auth/me')
+  return response.data
+}
+
+export async function changeMyPassword(oldPassword, newPassword) {
+  const response = await api.post('/auth/change-password', {
+    old_password: oldPassword,
+    new_password: newPassword
+  })
+  return response.data
+}
+
+export async function getUsers() {
+  const response = await api.get('/auth/users')
+  return response.data
+}
+
+export async function createUser(payload) {
+  const response = await api.post('/auth/users', payload)
+  return response.data
+}
+
+export async function updateUser(username, payload) {
+  const response = await api.patch(`/auth/users/${encodeURIComponent(username)}`, payload)
+  return response.data
+}
+
+export async function deleteUser(username) {
+  const response = await api.delete(`/auth/users/${encodeURIComponent(username)}`)
+  return response.data
+}
 
 // ============================================
 // Interface A: 프로젝트 관리 API
@@ -227,12 +304,24 @@ export async function convertQueriesStream(data, onMessage) {
   }
 
   try {
+    const token = getToken()
     const response = await fetch('/api/convert-stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
       body: JSON.stringify(data)
     })
 
+    if (response.status === 401) {
+      clearSession()
+      window.location.replace('/login')
+      throw new Error('세션이 만료되었습니다. 다시 로그인하세요.')
+    }
+    if (response.status === 403) {
+      throw new Error('쿼리 변환을 실행할 권한이 없습니다.')
+    }
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
@@ -370,21 +459,8 @@ export async function deleteHistory(id) {
 }
 
 // ============================================
-// Admin 모드 API
+// Admin 설정 API
 // ============================================
-
-export async function adminLogin(password) {
-  const response = await api.post('/settings/admin/login', { password })
-  return response.data
-}
-
-export async function changeAdminPassword(oldPassword, newPassword) {
-  const response = await api.post('/settings/admin/password', {
-    old_password: oldPassword,
-    new_password: newPassword
-  })
-  return response.data
-}
 
 export async function getEnabledModels() {
   const response = await api.get('/settings/enabled-models')

@@ -208,17 +208,31 @@
     <div v-else class="empty-state">
       <div class="empty-icon">📂</div>
       <p>조회된 변환 히스토리가 없습니다.</p>
-      <router-link to="/convert" class="btn btn-primary">데이터 변환 시작하기</router-link>
+      <p class="empty-hint" v-if="!isAdmin">
+        접근 가능한 프로젝트가 지정되지 않았을 수 있습니다. 관리자에게 문의하세요.
+      </p>
+      <router-link v-if="canConvert" to="/convert" class="btn btn-primary">
+        데이터 변환 시작하기
+      </router-link>
     </div>
+
+    <!-- 변환 결과 상세 (읽기 전용) -->
+    <HistoryDetailModal
+      v-if="detailId !== null"
+      :conversionId="detailId"
+      @close="detailId = null"
+    />
   </div>
 </template>
 
 <script>
 import { getHistory, getHistoryList, deleteHistory } from '../api'
-import { can, ROLE_ADMIN } from '../auth'
+import { can, ROLE_ADMIN, ROLE_ACTOR } from '../auth'
+import HistoryDetailModal from '../components/convert/HistoryDetailModal.vue'
 
 export default {
   name: 'HistoryView',
+  components: { HistoryDetailModal },
   data() {
     return {
       loading: false,
@@ -226,12 +240,17 @@ export default {
       projects: [],
       flatHistory: [],
       expandedProjects: {},
-      expandedFiles: {}
+      expandedFiles: {},
+      // 상세 모달로 열려 있는 conversion_id (null이면 닫힘)
+      detailId: null
     }
   },
   computed: {
     isAdmin() {
       return can(ROLE_ADMIN)
+    },
+    canConvert() {
+      return can(ROLE_ACTOR)
     }
   },
   mounted() {
@@ -339,11 +358,15 @@ export default {
       return krw.toFixed(1)
     },
 
+    /**
+     * 변환 결과를 히스토리 화면 안에서 읽기 전용으로 엽니다.
+     *
+     * 예전에는 /convert?historyId=... 로 이동했으나, 해당 경로는 Actor 이상만
+     * 접근할 수 있어 Viewer는 라우터 가드에 막혀 아무 반응이 없었습니다.
+     * 이제 권한과 무관하게 같은 화면에서 결과를 확인할 수 있습니다.
+     */
     viewDetail(attempt) {
-      this.$router.push({
-        path: '/convert',
-        query: { historyId: attempt.conversion_id }
-      })
+      this.detailId = attempt.conversion_id
     },
 
     async deleteRecord(conversionId) {
@@ -724,6 +747,12 @@ export default {
 }
 
 .empty-icon { font-size: 60px; margin-bottom: 20px; }
+
+.empty-hint {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-top: 8px;
+}
 
 .btn-spinner {
   display: inline-block;

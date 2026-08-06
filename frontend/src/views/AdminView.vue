@@ -39,6 +39,24 @@
           </div>
         </div>
         <p class="role-hint">{{ roleDesc[newUser.role] }}</p>
+
+        <!-- 접근 가능 프로젝트 (admin은 항상 전체이므로 숨김) -->
+        <div class="form-field scope-field" v-if="newUser.role !== 'admin'">
+          <label>접근 가능 프로젝트</label>
+          <div v-if="allProjects.length === 0" class="scope-inline-empty">
+            등록된 프로젝트가 없습니다. 계정 생성 후 프로젝트를 등록하고 지정하세요.
+          </div>
+          <div v-else class="scope-inline-list">
+            <label v-for="p in allProjects" :key="p.project_id" class="scope-inline-item">
+              <input type="checkbox" :value="p.project_id" v-model="newUser.project_ids" />
+              <span>{{ p.project_name }}</span>
+            </label>
+          </div>
+          <p class="scope-inline-hint" v-if="newUser.project_ids.length === 0 && allProjects.length > 0">
+            선택하지 않으면 이 계정은 어떤 이력도 볼 수 없습니다. (생성 후에도 지정할 수 있습니다)
+          </p>
+        </div>
+
         <div class="actions">
           <button class="primary-btn" @click="submitCreate" :disabled="creating || !canCreate">
             {{ creating ? '생성 중...' : '계정 생성' }}
@@ -54,6 +72,7 @@
               <th>ID</th>
               <th>이름</th>
               <th>권한</th>
+              <th>접근 프로젝트</th>
               <th>상태</th>
               <th>최근 로그인</th>
               <th class="col-actions">관리</th>
@@ -76,6 +95,29 @@
                   <option v-for="r in roles" :key="r.value" :value="r.value">{{ r.label }}</option>
                 </select>
               </td>
+              <td class="col-projects">
+                <span v-if="u.role === 'admin'" class="scope-chip all" title="Admin은 항상 전체 프로젝트에 접근합니다.">
+                  전체
+                </span>
+                <template v-else>
+                  <span v-if="!u.project_ids || u.project_ids.length === 0"
+                        class="scope-chip none"
+                        title="지정된 프로젝트가 없어 아무 이력도 볼 수 없습니다.">
+                    없음
+                  </span>
+                  <template v-else>
+                    <span
+                      v-for="pid in u.project_ids.slice(0, 2)"
+                      :key="pid"
+                      class="scope-chip"
+                      :title="projectName(pid)"
+                    >{{ projectName(pid) }}</span>
+                    <span v-if="u.project_ids.length > 2" class="scope-chip more">
+                      +{{ u.project_ids.length - 2 }}
+                    </span>
+                  </template>
+                </template>
+              </td>
               <td>
                 <span class="status-chip" :class="u.is_active ? 'on' : 'off'">
                   {{ u.is_active ? '활성' : '비활성' }}
@@ -85,6 +127,12 @@
               <td class="mono dim">{{ formatDate(u.last_login_at) }}</td>
               <td class="col-actions">
                 <div class="row-actions">
+                  <button
+                    class="mini-btn"
+                    :disabled="u.role === 'admin'"
+                    :title="u.role === 'admin' ? 'Admin은 항상 전체 프로젝트에 접근합니다.' : '이 계정이 볼 수 있는 프로젝트를 지정합니다.'"
+                    @click="openScopeEditor(u)"
+                  >프로젝트 지정</button>
                   <button class="mini-btn" @click="resetPassword(u)">비밀번호 초기화</button>
                   <button
                     class="mini-btn"
@@ -100,7 +148,7 @@
               </td>
             </tr>
             <tr v-if="users.length === 0">
-              <td colspan="6" class="empty">등록된 계정이 없습니다.</td>
+              <td colspan="7" class="empty">등록된 계정이 없습니다.</td>
             </tr>
           </tbody>
         </table>
@@ -156,13 +204,58 @@
         <button class="primary-btn" @click="submitPasswordChange" :disabled="!oldPw || !newPw">변경</button>
       </div>
     </div>
+
+    <!-- ───────── 프로젝트 접근 권한 지정 ───────── -->
+    <div v-if="scopeUser" class="modal-backdrop" @click.self="closeScopeEditor">
+      <div class="modal-panel">
+        <div class="modal-header">
+          <div>
+            <h3 class="modal-title">접근 가능 프로젝트 지정</h3>
+            <p class="modal-sub">
+              <span class="mono">{{ scopeUser.username }}</span>
+              ({{ shortLabel(scopeUser.role) }}) 계정이 조회할 수 있는 프로젝트입니다.
+            </p>
+          </div>
+          <button class="btn-close" @click="closeScopeEditor" aria-label="닫기">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <div v-if="allProjects.length === 0" class="scope-empty">
+            등록된 프로젝트가 없습니다. 먼저 프로젝트를 등록하세요.
+          </div>
+          <template v-else>
+            <div class="scope-toolbar">
+              <button class="mini-btn" @click="scopeSelected = allProjects.map(p => p.project_id)">전체 선택</button>
+              <button class="mini-btn" @click="scopeSelected = []">전체 해제</button>
+            </div>
+            <label v-for="p in allProjects" :key="p.project_id" class="scope-row">
+              <input type="checkbox" :value="p.project_id" v-model="scopeSelected" />
+              <span class="scope-name">{{ p.project_name }}</span>
+              <span class="scope-id mono">{{ p.project_id }}</span>
+            </label>
+          </template>
+
+          <p class="scope-warning" v-if="scopeSelected.length === 0 && allProjects.length > 0">
+            ⚠️ 선택된 프로젝트가 없으면 이 계정은 어떤 변환 이력도 볼 수 없습니다.
+          </p>
+        </div>
+
+        <div class="modal-footer">
+          <button class="mini-btn" @click="closeScopeEditor">취소</button>
+          <button class="primary-btn" @click="saveScope" :disabled="scopeSaving">
+            {{ scopeSaving ? '저장 중...' : '저장' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
 import {
   getEnabledModels, setEnabledModels,
-  getUsers, createUser, updateUser, deleteUser, changeMyPassword
+  getUsers, createUser, updateUser, deleteUser, changeMyPassword,
+  getProjects, getUserProjects, setUserProjects
 } from '../api'
 import { auth, ROLE_ADMIN, ROLE_ACTOR, ROLE_VIEWER, ROLE_LABEL, ROLE_DESC } from '../auth'
 
@@ -172,7 +265,7 @@ export default {
     return {
       users: [],
       creating: false,
-      newUser: { username: '', display_name: '', password: '', role: ROLE_VIEWER },
+      newUser: { username: '', display_name: '', password: '', role: ROLE_VIEWER, project_ids: [] },
       roles: [
         { value: ROLE_ADMIN, label: 'Admin — 전체 관리' },
         { value: ROLE_ACTOR, label: 'Actor — 환경 조회 + 쿼리 변환' },
@@ -182,6 +275,11 @@ export default {
       saving: false,
       oldPw: '',
       newPw: '',
+      // 프로젝트 접근 권한 지정
+      allProjects: [],
+      scopeUser: null,
+      scopeSelected: [],
+      scopeSaving: false,
       enabledModels: [],
       allModels: [
         { id: 'gpt-5.2-chat', name: 'Azure ChatGPT 5.2', desc: '기본 모델 (빠르고 안정적)' },
@@ -200,7 +298,7 @@ export default {
     }
   },
   async mounted() {
-    await Promise.all([this.fetchUsers(), this.fetchEnabledModels()])
+    await Promise.all([this.fetchUsers(), this.fetchEnabledModels(), this.fetchProjects()])
   },
   methods: {
     shortLabel(role) {
@@ -234,7 +332,9 @@ export default {
           username: this.newUser.username,
           password: this.newUser.password,
           role: this.newUser.role,
-          display_name: this.newUser.display_name || null
+          display_name: this.newUser.display_name || null,
+          // admin은 항상 전체 접근이므로 할당을 보내지 않는다
+          project_ids: this.newUser.role === 'admin' ? null : this.newUser.project_ids
         })
         alert(`계정 '${this.newUser.username}'이 생성되었습니다.\n최초 로그인 시 비밀번호 변경이 요구됩니다.`)
         this.newUser = { username: '', display_name: '', password: '', role: ROLE_VIEWER }
@@ -291,6 +391,61 @@ export default {
         await this.fetchUsers()
       } catch (e) {
         alert('삭제 실패: ' + this.errText(e, '알 수 없는 오류'))
+      }
+    },
+
+    // ── 프로젝트 접근 권한 ──
+    async fetchProjects() {
+      try {
+        const res = await getProjects()
+        this.allProjects = res.projects || []
+      } catch (e) {
+        console.error('Failed to fetch projects:', e)
+      }
+    },
+
+    projectName(pid) {
+      const p = this.allProjects.find(x => x.project_id === pid)
+      return p ? p.project_name : pid
+    },
+
+    async openScopeEditor(user) {
+      if (user.role === 'admin') return
+      this.scopeUser = user
+      // 목록 응답의 값을 먼저 쓰고, 서버 최신값으로 덮어쓴다
+      this.scopeSelected = [...(user.project_ids || [])]
+      if (this.allProjects.length === 0) await this.fetchProjects()
+      try {
+        const res = await getUserProjects(user.username)
+        // 응답이 늦게 도착하는 사이 다른 계정을 열었다면 덮어쓰지 않는다
+        if (this.scopeUser && this.scopeUser.username === user.username) {
+          this.scopeSelected = res.project_ids || []
+        }
+      } catch (e) {
+        console.error('Failed to fetch user projects:', e)
+      }
+    },
+
+    closeScopeEditor() {
+      this.scopeUser = null
+      this.scopeSelected = []
+    },
+
+    async saveScope() {
+      if (!this.scopeUser) return
+      if (this.scopeSelected.length === 0 &&
+          !confirm(`'${this.scopeUser.username}' 계정은 어떤 프로젝트의 이력도 볼 수 없게 됩니다. 계속할까요?`)) {
+        return
+      }
+      this.scopeSaving = true
+      try {
+        await setUserProjects(this.scopeUser.username, this.scopeSelected)
+        await this.fetchUsers()
+        this.closeScopeEditor()
+      } catch (e) {
+        alert('저장 실패: ' + this.errText(e, '알 수 없는 오류'))
+      } finally {
+        this.scopeSaving = false
       }
     },
 
@@ -661,4 +816,165 @@ export default {
 }
 
 .pw-form .input { flex: 1; }
+
+/* ── 계정 생성 폼의 프로젝트 선택 ── */
+.scope-field { margin-bottom: 12px; }
+
+.scope-inline-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  max-height: 130px;
+  overflow-y: auto;
+}
+
+.scope-inline-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #334155;
+  cursor: pointer;
+}
+
+.scope-inline-empty,
+.scope-inline-hint {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.scope-inline-hint { margin: 6px 0 0; }
+
+/* ── 접근 프로젝트 컬럼 ── */
+.col-projects { max-width: 220px; }
+
+.scope-chip {
+  display: inline-block;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin: 1px 3px 1px 0;
+}
+
+.scope-chip.all { background: #dcfce7; color: #15803d; }
+.scope-chip.none { background: #fee2e2; color: #b91c1c; }
+.scope-chip.more { background: #e0e7ff; color: #4338ca; }
+
+/* ── 프로젝트 지정 모달 ── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.modal-panel {
+  background: #fff;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 4px;
+}
+
+.modal-sub { margin: 0; font-size: 12px; color: #64748b; }
+
+.btn-close {
+  background: #f1f5f9;
+  border: none;
+  color: #475569;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.modal-body {
+  padding: 14px 22px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.scope-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.scope-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.scope-row:hover { background: #f8fafc; }
+
+.scope-name { font-size: 13px; font-weight: 600; color: #1e293b; }
+.scope-id { font-size: 11px; color: #94a3b8; margin-left: auto; }
+
+.scope-empty {
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+  padding: 30px 0;
+}
+
+.scope-warning {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 22px;
+  border-top: 1px solid #eef2f7;
+  background: #fafbfd;
+}
 </style>

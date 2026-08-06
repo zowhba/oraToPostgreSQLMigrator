@@ -28,8 +28,8 @@ export const ROLE_LABEL = {
 
 export const ROLE_DESC = {
   [ROLE_ADMIN]: '모든 설정 및 계정을 관리할 수 있습니다.',
-  [ROLE_ACTOR]: '등록된 환경을 조회/선택하고 쿼리 변환을 실행할 수 있습니다.',
-  [ROLE_VIEWER]: '쿼리 변환 이력만 조회할 수 있습니다.'
+  [ROLE_ACTOR]: '지정된 프로젝트의 환경을 조회/선택하고 쿼리 변환을 실행할 수 있습니다.',
+  [ROLE_VIEWER]: '지정된 프로젝트의 변환 이력만 조회할 수 있습니다.'
 }
 
 function loadUser() {

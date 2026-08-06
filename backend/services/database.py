@@ -219,6 +219,23 @@ def init_tables():
         CHECK (role IN ('admin', 'actor', 'viewer'))
     """)
 
+    # ─────────────────────────────────────────────
+    # 계정별 접근 허용 프로젝트 (actor/viewer 전용)
+    #
+    # 여기에 행이 없는 actor/viewer 계정은 아무 프로젝트도 볼 수 없습니다.
+    # admin은 이 테이블과 무관하게 항상 전체 프로젝트에 접근합니다.
+    # ─────────────────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_projects (
+            username   VARCHAR(50)  NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+            project_id VARCHAR(100) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+            granted_by VARCHAR(50),
+            created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (username, project_id)
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_user_projects_username ON user_projects (username)")
+
     cur.close()
     _bootstrap_auth()
     logger.info("[AppDB] 테이블 초기화 완료")

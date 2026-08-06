@@ -17,7 +17,11 @@ from backend.services import database as app_db
 from backend.services.auth_service import ROLE_ADMIN, ROLE_ACTOR, ROLE_VIEWER
 
 
-def _fake_user(role: str = ROLE_ADMIN):
+# 테스트 계정에 기본 할당되는 프로젝트 (admin은 이 값과 무관하게 전체 접근)
+DEFAULT_TEST_PROJECT_IDS = ["PRJ_TEST_001", "PRJ_TEST_002"]
+
+
+def _fake_user(role: str = ROLE_ADMIN, project_ids=None):
     return {
         "username": f"test_{role}",
         "role": role,
@@ -29,6 +33,9 @@ def _fake_user(role: str = ROLE_ADMIN):
         "last_login_at": None,
         "created_at": None,
         "updated_at": None,
+        "project_ids": (
+            list(DEFAULT_TEST_PROJECT_IDS) if project_ids is None else list(project_ids)
+        ),
     }
 
 
@@ -72,9 +79,14 @@ def client_as():
         def test_x(client_as):
             c = client_as('viewer')
             assert c.get('/api/settings').status_code == 403
+
+    project_ids를 넘기면 해당 계정의 접근 허용 프로젝트를 지정할 수 있습니다.
+    (빈 리스트 = 아무 프로젝트도 볼 수 없는 계정)
     """
-    def _factory(role: str = ROLE_ACTOR):
-        app.dependency_overrides[deps.get_current_user] = lambda: _fake_user(role)
+    def _factory(role: str = ROLE_ACTOR, project_ids=None):
+        app.dependency_overrides[deps.get_current_user] = (
+            lambda: _fake_user(role, project_ids)
+        )
         return TestClient(app)
 
     yield _factory

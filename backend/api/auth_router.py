@@ -11,7 +11,7 @@
 - DELETE /api/auth/users/{username} 계정 삭제 (Admin)
 """
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -41,6 +41,9 @@ class UserCreateRequest(BaseModel):
     password: str = Field(..., max_length=200)
     role: str = Field(default=auth_service.ROLE_VIEWER)
     display_name: Optional[str] = Field(default=None, max_length=100)
+    project_ids: Optional[List[str]] = Field(
+        default=None, description="접근 허용 프로젝트 ID 목록 (actor/viewer 전용)"
+    )
 
 
 class UserUpdateRequest(BaseModel):
@@ -48,6 +51,10 @@ class UserUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
     display_name: Optional[str] = Field(default=None, max_length=100)
     new_password: Optional[str] = Field(default=None, max_length=200)
+
+
+class UserProjectsRequest(BaseModel):
+    project_ids: List[str] = Field(default_factory=list)
 
 
 def _client_key(request: Request) -> str:
@@ -144,6 +151,7 @@ def create_user(
             role=payload.role,
             display_name=payload.display_name,
             created_by=admin["username"],
+            project_ids=payload.project_ids,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -169,6 +177,36 @@ def update_user(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return {"status": "success", "user": user}
+
+
+@router.get("/users/{username}/projects", dependencies=[Depends(require_admin)])
+def get_user_projects(username: str):
+    """계정에 할당된 접근 허용 프로젝트 목록을 조회합니다."""
+    if not auth_service.get_user(username):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"사용자를 찾을 수 없습니다: {username}")
+    return {"status": "success", "project_ids": auth_service.list_user_projects(username)}
+
+
+@router.put("/users/{username}/projects")
+def set_user_projects(
+    username: str,
+    payload: UserProjectsRequest,
+    admin: CurrentUser = Depends(require_admin),
+):
+    """
+    계정의 접근 허용 프로젝트를 전달된 목록으로 교체합니다.
+
+    빈 목록이면 해당 계정은 어떤 프로젝트도 조회할 수 없습니다.
+    (admin 계정은 이 설정과 무관하게 항상 전체 접근)
+    """
+    try:
+        project_ids = auth_service.set_user_projects(
+            username, payload.project_ids, granted_by=admin["username"]
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return {"status": "success", "project_ids": project_ids}
 
 
 @router.delete("/users/{username}")

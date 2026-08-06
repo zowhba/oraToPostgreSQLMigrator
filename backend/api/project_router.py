@@ -4,7 +4,13 @@ Interface A — 프로젝트-DB 매핑 설정 라우터
 from fastapi import APIRouter, Depends, HTTPException
 
 from typing import Optional
-from backend.api.deps import require_actor, require_admin
+from backend.api.deps import (
+    CurrentUser,
+    allowed_project_ids,
+    ensure_project_access,
+    require_actor,
+    require_admin,
+)
 from backend.schemas.project import (
     ProjectCreateRequest,
     ProjectCreateResponse,
@@ -23,15 +29,29 @@ async def create_project(req: ProjectCreateRequest):
     return project_service.create_project(req)
 
 
-@router.get("", response_model=ProjectListResponse, dependencies=[Depends(require_actor)])
-async def list_projects():
-    """등록된 프로젝트 목록 조회 — Actor 이상"""
-    return project_service.list_projects()
+@router.get("", response_model=ProjectListResponse)
+async def list_projects(user: CurrentUser = Depends(require_actor)):
+    """등록된 프로젝트 목록 조회 — Actor 이상, 접근 허용된 프로젝트만"""
+    result = project_service.list_projects()
+    allowed = allowed_project_ids(user)
+    if allowed is None:
+        return result
+
+    allowed_set = set(allowed)
+    projects = result["projects"] if isinstance(result, dict) else result.projects
+    filtered = [p for p in projects
+                if (p["project_id"] if isinstance(p, dict) else p.project_id) in allowed_set]
+    if isinstance(result, dict):
+        result["projects"] = filtered
+    else:
+        result.projects = filtered
+    return result
 
 
-@router.get("/{project_id}", dependencies=[Depends(require_actor)])
-async def get_project(project_id: str):
-    """단일 프로젝트 조회 — Actor 이상"""
+@router.get("/{project_id}")
+async def get_project(project_id: str, user: CurrentUser = Depends(require_actor)):
+    """단일 프로젝트 조회 — Actor 이상, 접근 허용된 프로젝트만"""
+    ensure_project_access(user, project_id)
     proj = project_service.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail=f"프로젝트 '{project_id}'를 찾을 수 없습니다.")
@@ -75,6 +95,7 @@ async def test_connection(
     - body에 config가 있으면 해당 값으로 테스트 (임의 접속정보 지정이므로 Admin 전용)
     - body가 없으면 저장된 설정으로 테스트 (Actor 이상)
     """
+    ensure_project_access(user, project_id)
     if config:
         if user["role"] != "admin":
             raise HTTPException(

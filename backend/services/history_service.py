@@ -5,7 +5,7 @@ conversions 및 query_conversions 테이블에 결과 저장
 import json
 import logging
 import time
-from typing import List, Dict
+from typing import List, Dict, Optional
 from backend.services import database
 from backend.schemas.convert import ConvertRequest, ConvertResponse
 
@@ -87,16 +87,35 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
         logger.error("[History] 히스토리 저장 중 오류 발생: %s", str(e))
         # 히스토리 저장은 부가 기능이므로 메인 흐름을 방해하지 않도록 예외를 로깅만 하고 상위로 던지지 않음
 
-def get_history_hierarchy() -> List[Dict]:
+def _scope_clause(allowed_project_ids: Optional[List[str]]):
+    """
+    프로젝트 범위 제한을 SQL 조건과 파라미터로 변환합니다.
+
+    - None : 제한 없음 (admin)
+    - []   : 호출 측에서 빈 결과로 단축 처리
+    """
+    if allowed_project_ids is None:
+        # 파라미터가 없을 때 ()가 아닌 None을 넘겨야 psycopg2가 %-치환을 건너뛴다
+        # (쿼리에 LIKE '%...%' 등이 추가돼도 깨지지 않도록)
+        return "", None
+    return "WHERE c.project_id = ANY(%s)", (list(allowed_project_ids),)
+
+
+def get_history_hierarchy(allowed_project_ids: Optional[List[str]] = None) -> List[Dict]:
     """
     1레벨: 프로젝트, 2레벨: 파일, 3레벨: 시도(Attempt) 계층으로 히스토리 반환
+
+    allowed_project_ids가 None이면 전체, 빈 리스트면 조회 결과가 없습니다.
     """
+    if allowed_project_ids is not None and not allowed_project_ids:
+        return []
+    where_sql, where_params = _scope_clause(allowed_project_ids)
     try:
         conn = database.get_connection()
         cur = conn.cursor(cursor_factory=database.RealDictCursor)
 
         # 모든 변환 기록 조회 (프로젝트 정보 + 토큰/비용 포함)
-        cur.execute("""
+        cur.execute(f"""
             SELECT
                 c.conversion_id,
                 c.project_id,
@@ -116,8 +135,9 @@ def get_history_hierarchy() -> List[Dict]:
             FROM conversions c
             LEFT JOIN projects p ON c.project_id = p.project_id
             LEFT JOIN llm_pricing lp ON c.used_model = lp.model_id
+            {where_sql}
             ORDER BY p.project_name, c.xml_file_name, c.created_at DESC
-        """)
+        """, where_params)
         rows = cur.fetchall()
         cur.close()
 
@@ -194,15 +214,20 @@ def get_history_hierarchy() -> List[Dict]:
         logger.error("[History] 히스토리 조회 실패: %s", str(e))
         return []
 
-def get_history_list() -> List[Dict]:
+def get_history_list(allowed_project_ids: Optional[List[str]] = None) -> List[Dict]:
     """
     모든 변환 시도를 최신순으로 평면 목록(Flat List)으로 반환
+
+    allowed_project_ids가 None이면 전체, 빈 리스트면 조회 결과가 없습니다.
     """
+    if allowed_project_ids is not None and not allowed_project_ids:
+        return []
+    where_sql, where_params = _scope_clause(allowed_project_ids)
     try:
         conn = database.get_connection()
         cur = conn.cursor(cursor_factory=database.RealDictCursor)
 
-        cur.execute("""
+        cur.execute(f"""
             SELECT
                 c.conversion_id,
                 c.project_id,
@@ -222,8 +247,9 @@ def get_history_list() -> List[Dict]:
             FROM conversions c
             LEFT JOIN projects p ON c.project_id = p.project_id
             LEFT JOIN llm_pricing lp ON c.used_model = lp.model_id
+            {where_sql}
             ORDER BY c.created_at DESC
-        """)
+        """, where_params)
         rows = cur.fetchall()
         cur.close()
 

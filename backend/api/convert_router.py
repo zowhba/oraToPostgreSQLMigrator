@@ -6,7 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 import json
 
-from backend.api.deps import CurrentUser, require_actor, require_admin, require_viewer
+from backend.api.deps import (
+    CurrentUser,
+    allowed_project_ids,
+    ensure_project_access,
+    require_actor,
+    require_admin,
+    require_viewer,
+)
 from backend.schemas.convert import ConvertRequest, ConvertResponse
 from backend.services import convert_service, history_service
 from backend.services import database
@@ -22,6 +29,7 @@ async def convert_queries(req: ConvertRequest, user: CurrentUser = Depends(requi
     XML 파일 단위 쿼리 변환 (기존 동기식 API) — Actor 이상
     """
     logger.info("[API] POST /api/convert — user=%s", user["username"])
+    ensure_project_access(user, req.project_id)
     return convert_service.process_conversion(req)
 
 
@@ -37,6 +45,7 @@ async def convert_queries_stream(req: ConvertRequest, user: CurrentUser = Depend
         req.xml_file_name,
         len(req.queries),
     )
+    ensure_project_access(user, req.project_id)
 
     def event_generator():
         for item in convert_service.stream_conversion(req):
@@ -57,36 +66,44 @@ async def convert_queries_stream(req: ConvertRequest, user: CurrentUser = Depend
     )
 
 
-@router.get("/history", dependencies=[Depends(require_viewer)])
-async def get_history():
-    """작업 히스토리 계층 구조 조회 — 로그인한 모든 사용자"""
+@router.get("/history")
+async def get_history(user: CurrentUser = Depends(require_viewer)):
+    """작업 히스토리 계층 구조 조회 — 접근 허용된 프로젝트만"""
     return {
         "status": "success",
-        "data": history_service.get_history_hierarchy()
+        "data": history_service.get_history_hierarchy(allowed_project_ids(user))
     }
 
 
-@router.get("/history/list", dependencies=[Depends(require_viewer)])
-async def get_history_flat():
-    """작업 히스토리 전체 목록 최신순 조회 — 로그인한 모든 사용자"""
+@router.get("/history/list")
+async def get_history_flat(user: CurrentUser = Depends(require_viewer)):
+    """작업 히스토리 전체 목록 최신순 조회 — 접근 허용된 프로젝트만"""
     return {
         "status": "success",
-        "data": history_service.get_history_list()
+        "data": history_service.get_history_list(allowed_project_ids(user))
     }
 
 
-@router.get("/history/{conversion_id}", dependencies=[Depends(require_viewer)])
-async def get_history_detail(conversion_id: int):
-    """특정 변환 히스토리 상세 조회 — 로그인한 모든 사용자"""
+@router.get("/history/{conversion_id}")
+async def get_history_detail(conversion_id: int, user: CurrentUser = Depends(require_viewer)):
+    """특정 변환 히스토리 상세 조회 — 접근 허용된 프로젝트만"""
     try:
         conn = database.get_connection()
         # with 블록으로 예외 경로에서도 커서가 닫히도록 보장
         with conn.cursor(cursor_factory=database.RealDictCursor) as cur:
-            # 마스터 정보
-            cur.execute("SELECT * FROM conversions WHERE conversion_id = %s", (conversion_id,))
+            # 마스터 정보 (프로젝트명 포함)
+            cur.execute("""
+                SELECT c.*, p.project_name
+                FROM conversions c
+                LEFT JOIN projects p ON c.project_id = p.project_id
+                WHERE c.conversion_id = %s
+            """, (conversion_id,))
             master = cur.fetchone()
             if not master:
                 raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
+
+            # 접근 허용 프로젝트 밖의 이력은 존재 여부도 노출하지 않는다
+            ensure_project_access(user, master["project_id"])
 
             # 상세 쿼리 결과
             cur.execute("""
@@ -111,11 +128,25 @@ async def get_history_detail(conversion_id: int):
                 "confidence_score": q.get("confidence_score", 0.0)
             })
 
+        created_at = master.get("created_at")
         return {
             "status": "success",
             "data": {
+                "conversion_id": master["conversion_id"],
                 "project_id": master["project_id"],
+                "project_name": master.get("project_name") or "알 수 없는 프로젝트",
                 "xml_file_name": master["xml_file_name"],
+                "used_model": master.get("used_model"),
+                "duration_seconds": master.get("duration_seconds"),
+                "total_queries": master.get("total_queries"),
+                "total_input_tokens": master.get("total_input_tokens") or 0,
+                "total_output_tokens": master.get("total_output_tokens") or 0,
+                "created_at": created_at.isoformat() + "Z" if created_at else None,
+                "levels": {
+                    "l1": master.get("l1_count") or 0,
+                    "l2": master.get("l2_count") or 0,
+                    "l3": master.get("l3_count") or 0,
+                },
                 "queries": formatted_queries
             }
         }

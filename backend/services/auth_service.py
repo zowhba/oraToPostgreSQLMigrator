@@ -264,6 +264,8 @@ def _row_to_user(row) -> Dict:
         "last_login_at": _iso(row[6]),
         "created_at": _iso(row[7]),
         "updated_at": _iso(row[8]),
+        # 접근 허용 프로젝트 (admin은 전체 접근이므로 의미 없음)
+        "project_ids": [],
     }
 
 
@@ -273,18 +275,103 @@ def get_user(username: str) -> Optional[Dict]:
     with conn.cursor() as cur:
         cur.execute(f"SELECT {_USER_COLUMNS} FROM users WHERE username = %s", (username,))
         row = cur.fetchone()
-        return _row_to_user(row) if row else None
+        if not row:
+            return None
+        user = _row_to_user(row)
+        cur.execute(
+            "SELECT project_id FROM user_projects WHERE username = %s ORDER BY project_id",
+            (username,),
+        )
+        user["project_ids"] = [r[0] for r in cur.fetchall()]
+        return user
 
 
 def list_users() -> List[Dict]:
-    """전체 사용자 목록을 조회합니다."""
+    """전체 사용자 목록을 조회합니다 (계정별 허용 프로젝트 포함)."""
     conn = app_db.get_connection()
     with conn.cursor() as cur:
         cur.execute(f"""
             SELECT {_USER_COLUMNS} FROM users
             ORDER BY CASE role WHEN 'admin' THEN 0 WHEN 'actor' THEN 1 ELSE 2 END, username
         """)
-        return [_row_to_user(r) for r in cur.fetchall()]
+        users = [_row_to_user(r) for r in cur.fetchall()]
+
+        # N+1 회피: 매핑을 한 번에 읽어 사용자별로 분배
+        cur.execute("SELECT username, project_id FROM user_projects ORDER BY project_id")
+        mapping: Dict[str, List[str]] = {}
+        for uname, pid in cur.fetchall():
+            mapping.setdefault(uname, []).append(pid)
+
+    for u in users:
+        u["project_ids"] = mapping.get(u["username"], [])
+    return users
+
+
+# ─────────────────────────────────────────────
+# 계정별 접근 허용 프로젝트
+# ─────────────────────────────────────────────
+def list_user_projects(username: str) -> List[str]:
+    """계정에 할당된 프로젝트 ID 목록을 반환합니다."""
+    conn = app_db.get_connection()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT project_id FROM user_projects WHERE username = %s ORDER BY project_id",
+            (username,),
+        )
+        return [r[0] for r in cur.fetchall()]
+
+
+def _validate_project_ids(cur, project_ids: Optional[List[str]]) -> List[str]:
+    """중복을 제거하고 실재하는 프로젝트인지 검증합니다. 실패 시 ValueError."""
+    wanted = list(dict.fromkeys(pid for pid in (project_ids or []) if pid))
+    if not wanted:
+        return []
+    cur.execute("SELECT project_id FROM projects WHERE project_id = ANY(%s)", (wanted,))
+    existing = {r[0] for r in cur.fetchall()}
+    unknown = [pid for pid in wanted if pid not in existing]
+    if unknown:
+        raise ValueError(f"존재하지 않는 프로젝트입니다: {', '.join(unknown)}")
+    return wanted
+
+
+def set_user_projects(username: str, project_ids: List[str],
+                      granted_by: Optional[str] = None) -> List[str]:
+    """계정의 접근 허용 프로젝트를 전달된 목록으로 교체합니다. 실패 시 ValueError."""
+    if not get_user(username):
+        raise ValueError(f"사용자를 찾을 수 없습니다: {username}")
+
+    conn = app_db.get_connection()
+    with conn.cursor() as cur:
+        wanted = _validate_project_ids(cur, project_ids)
+        cur.execute("DELETE FROM user_projects WHERE username = %s", (username,))
+        for pid in wanted:
+            cur.execute(
+                "INSERT INTO user_projects (username, project_id, granted_by) VALUES (%s, %s, %s)",
+                (username, pid, granted_by),
+            )
+
+    logger.info("[Auth] 프로젝트 접근 권한 설정: %s → %s (by=%s)",
+                username, wanted or "(없음)", granted_by)
+    return wanted
+
+
+def allowed_project_ids(user: Dict) -> Optional[List[str]]:
+    """
+    사용자가 접근 가능한 프로젝트 ID 목록.
+
+    - None  : 제한 없음 (admin)
+    - []    : 접근 가능한 프로젝트 없음 (미지정 actor/viewer)
+    - [...] : 허용된 프로젝트만
+    """
+    if user.get("role") == ROLE_ADMIN:
+        return None
+    return list(user.get("project_ids") or [])
+
+
+def can_access_project(user: Dict, project_id: str) -> bool:
+    """해당 프로젝트에 접근할 수 있는지 판정합니다."""
+    allowed = allowed_project_ids(user)
+    return allowed is None or project_id in allowed
 
 
 def count_active_admins(exclude: Optional[str] = None) -> int:
@@ -364,6 +451,7 @@ def authenticate(username: str, password: str, client_key: str = "") -> Dict:
             "role_label": ROLE_LABEL.get(row[2], row[2]),
             "display_name": row[5],
             "must_change_pw": bool(row[4]),
+            "project_ids": list_user_projects(row[0]),
         },
         "message": "",
         "locked_seconds": 0,
@@ -373,7 +461,8 @@ def authenticate(username: str, password: str, client_key: str = "") -> Dict:
 def create_user(username: str, password: str, role: str,
                 display_name: Optional[str] = None,
                 created_by: Optional[str] = None,
-                must_change_pw: bool = True) -> Dict:
+                must_change_pw: bool = True,
+                project_ids: Optional[List[str]] = None) -> Dict:
     """신규 사용자를 생성합니다 (Admin 전용). 실패 시 ValueError."""
     validate_username(username)
     validate_password_policy(password)
@@ -385,6 +474,11 @@ def create_user(username: str, password: str, role: str,
         cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
         if cur.fetchone():
             raise ValueError(f"이미 존재하는 ID입니다: {username}")
+
+        # 계정만 생성되고 프로젝트 할당이 실패해 되돌릴 수 없는 상태를 막기 위해
+        # INSERT 전에 프로젝트 존재 여부를 먼저 검증한다.
+        wanted = _validate_project_ids(cur, project_ids) if project_ids else []
+
         try:
             cur.execute("""
                 INSERT INTO users (username, password_hash, role, display_name,
@@ -396,7 +490,14 @@ def create_user(username: str, password: str, role: str,
             # 검사-삽입 사이의 경합 (동시에 같은 ID 생성 시도)
             raise ValueError(f"이미 존재하는 ID입니다: {username}")
 
-    logger.info("[Auth] 계정 생성: %s (role=%s, by=%s)", username, role, created_by)
+        for pid in wanted:
+            cur.execute(
+                "INSERT INTO user_projects (username, project_id, granted_by) VALUES (%s, %s, %s)",
+                (username, pid, created_by),
+            )
+
+    logger.info("[Auth] 계정 생성: %s (role=%s, projects=%s, by=%s)",
+                username, role, wanted or "(없음)", created_by)
     return get_user(username)
 
 

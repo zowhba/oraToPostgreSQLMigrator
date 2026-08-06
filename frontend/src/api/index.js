@@ -130,6 +130,21 @@ export async function deleteUser(username) {
   return response.data
 }
 
+/** 계정별 접근 허용 프로젝트 조회 - GET /api/auth/users/{username}/projects */
+export async function getUserProjects(username) {
+  const response = await api.get(`/auth/users/${encodeURIComponent(username)}/projects`)
+  return response.data
+}
+
+/** 계정별 접근 허용 프로젝트 교체 - PUT /api/auth/users/{username}/projects */
+export async function setUserProjects(username, projectIds) {
+  const response = await api.put(
+    `/auth/users/${encodeURIComponent(username)}/projects`,
+    { project_ids: projectIds }
+  )
+  return response.data
+}
+
 // ============================================
 // Interface A: 프로젝트 관리 API
 // ============================================

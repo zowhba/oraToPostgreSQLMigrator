@@ -126,3 +126,25 @@ def require_role(min_role: str):
 require_viewer = require_role(ROLE_VIEWER)  # 로그인한 모든 사용자
 require_actor = require_role(ROLE_ACTOR)    # Actor 이상
 require_admin = require_role(ROLE_ADMIN)    # Admin 전용
+
+
+# ─────────────────────────────────────────────
+# 프로젝트 접근 범위
+# ─────────────────────────────────────────────
+def allowed_project_ids(user: CurrentUser):
+    """접근 가능한 프로젝트 ID 목록 (None이면 제한 없음)."""
+    return auth_service.allowed_project_ids(user)
+
+
+def ensure_project_access(user: CurrentUser, project_id: str) -> None:
+    """해당 프로젝트에 접근 권한이 없으면 403을 발생시킵니다."""
+    if auth_service.can_access_project(user, project_id):
+        return
+    logger.warning(
+        "[Auth] 프로젝트 접근 거부: user=%s role=%s project=%s",
+        user["username"], user["role"], project_id,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="이 프로젝트에 접근할 권한이 없습니다. 관리자에게 문의하세요.",
+    )

@@ -64,6 +64,7 @@ async def get_project(project_id: str, user: CurrentUser = Depends(require_actor
         "status": "success",
         "project_id": proj["project_id"],
         "project_name": proj["project_name"],
+        "system_prompt": proj.get("system_prompt") or "",
         "db_config": {
             "host": cfg.host,
             "port": cfg.port,

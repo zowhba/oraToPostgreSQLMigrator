@@ -82,6 +82,15 @@ _SQL_SCRIPT_SYSTEM_SUFFIX = (
     "원본을 주석으로 남긴 뒤 unconverted_items에 반드시 포함하십시오."
 )
 
+_EXCEL_SYSTEM_SUFFIX = (
+    "[엑셀 쿼리 목록 모드]\n"
+    "이번 입력은 MyBatis XML이 아니라 애플리케이션 소스에서 추출한 SQL 한 문장입니다.\n"
+    "- converted_sql에는 XML 태그(<select> 등)나 마크다운 코드펜스(```)를 절대 포함하지 마십시오. "
+    "실행 가능한 PostgreSQL SQL 원문만 담으십시오.\n"
+    "- JDBC 바인드 변수 `?` 는 개수와 순서를 그대로 유지하십시오. `#{}`/`${}` 등 다른 표기로 바꾸지 마십시오.\n"
+    "- 원본이 여러 문장이 아니라면 결과도 반드시 한 문장으로 유지하십시오."
+)
+
 # 응답에 혼입되는 마크다운 코드펜스 제거용
 _CODE_FENCE_PATTERN = re.compile(
     r"^\s*```[a-zA-Z]*\s*\n(?P<body>.*?)\n?\s*```\s*$", re.DOTALL
@@ -207,6 +216,74 @@ def _build_sql_script_user_prompt(
     "confidence": 0.0에서 1.0 사이의 변환 확신도
   }},
   "ai_guide_report": "리포트 작성 가이드 (Markdown 형식): 반드시 최상단에 '### 변환 확신도: XX%'를 명시하십시오. 그 후 다음 순서로 작성하십시오: 1) 주요 변경 사항, 2) 주의사항, 3) 테스트 권장사항. Dry-run 검증이 수행되지 않으므로 '테스트 권장사항'에는 개발 DB에서 직접 컴파일·실행하여 확인할 항목을 구체적으로 기술하십시오."
+}}
+"""
+
+
+def _build_excel_user_prompt(
+    original_sql: str, schema_context: str, tag_name: str
+) -> str:
+    """
+    엑셀에 정리된 SQL(애플리케이션 소스에서 추출한 단일 문장) 전용 사용자 프롬프트.
+
+    MyBatis 동적 태그가 없고 바인드가 JDBC `?` 이므로,
+    XML 규칙 대신 '순수 SQL 한 문장' 규칙을 사용합니다.
+    """
+    return f"""## 대상 DB의 테이블 스키마:
+{schema_context if schema_context else "(스키마 정보 없음)"}
+
+## 원본 Oracle SQL (문장 종류: {tag_name}):
+```sql
+{original_sql}
+```
+
+## 변환 규칙:
+1. ★ 출력은 XML이 아니라 **순수 PostgreSQL SQL 한 문장**입니다. MyBatis 태그(<select>, <if> 등)를 절대 추가하지 마십시오.
+2. ★ 바인드 변수 `?` 는 개수·순서를 그대로 보존하십시오. Java 코드가 `setXxx(1, ...)` 순서로 값을 넣으므로
+   파라미터 순서가 바뀌면 런타임에 잘못된 값이 바인딩됩니다. 순서를 바꿔야만 하는 경우
+   `unconverted_items` 와 리포트에 반드시 명시하십시오.
+3. Oracle 함수 → PostgreSQL 대응 변환:
+   - NVL → COALESCE, NVL2 → CASE WHEN, DECODE → CASE WHEN, LNNVL → NOT(...)
+   - SYSDATE / SYSTIMESTAMP → CURRENT_TIMESTAMP, `FROM DUAL` 제거
+   - ROWNUM 페이징 → LIMIT / OFFSET, `ROWNUM = 1` → `LIMIT 1`
+   - CONNECT BY → WITH RECURSIVE, LISTAGG / WM_CONCAT → STRING_AGG
+   - MERGE INTO → INSERT ... ON CONFLICT
+   - .NEXTVAL → nextval('seq'), .CURRVAL → currval('seq')
+4. Oracle 힌트(`/*+ ... */`)와 사내 표기용 주석(`/*$...$...*/`)은 제거하십시오.
+5. 데이터타입: NUMBER→NUMERIC, VARCHAR2→VARCHAR, CLOB→TEXT, BLOB→BYTEA, DATE→TIMESTAMP
+6. ★ 날짜 연산 타입 차이 (반드시 준수):
+   - Oracle: 날짜 - 날짜 = NUMBER(일수) / PostgreSQL: TIMESTAMP - TIMESTAMP = INTERVAL
+   - TRUNC(date1 - date2) → EXTRACT(DAY FROM (date1 - date2))::INTEGER
+   - 날짜 ± N일: `date + n` → `date + n * INTERVAL '1 day'`
+   - ADD_MONTHS(d, n) → `d + (n || ' months')::INTERVAL`
+   - MONTHS_BETWEEN(d1, d2) → EXTRACT(YEAR FROM AGE(d1, d2)) * 12 + EXTRACT(MONTH FROM AGE(d1, d2))
+7. ★ 타입 캐스팅 및 NULL 비교:
+   - PostgreSQL은 타입 비교에 엄격합니다. 숫자와 문자열 비교 시 명시적 캐스팅(`col::text`)을 추가하십시오.
+   - `col = NULL` → `col IS NULL`, `col != NULL` → `col IS NOT NULL`
+8. ★ FROM 절 JOIN 스코프:
+   - Oracle 스타일 콤마 조인과 ANSI JOIN 혼용은 PostgreSQL에서 항상 에러입니다.
+     FROM 절 전체를 명시적 JOIN 체인으로 재작성하고 콤마 조인은 남기지 마십시오.
+   - `(+)` 아우터조인 → LEFT/RIGHT OUTER JOIN
+9. 원본이 `BEGIN 프로시저(?,...); END;` 형태의 PL/SQL 호출이면 `CALL 프로시저(?,...)` 로 변환하고,
+   대상 DB에 프로시저가 이식되어 있어야 한다는 점을 리포트와 `unconverted_items` 에 명시하십시오.
+10. ★ 원본 SQL에 명백한 오타나 문법 오류가 있으면(예: `TO_CAHR`, INSERT 문 뒤의 ORDER BY)
+   임의로 판단해 지우지 말고, 가장 그럴듯하게 교정한 뒤 무엇을 왜 고쳤는지 리포트와 `unconverted_items` 에 남기십시오.
+11. ★ 절대로 쿼리 내용을 생략하거나 말줄임표(...)를 사용하지 마십시오. 처음부터 끝까지 완전하게 작성하십시오.
+
+## 응답 형식 (반드시 아래 JSON으로만):
+{{
+  "converted_sql": "변환된 PostgreSQL SQL 원문 (XML 태그 없음, 코드펜스 없음)",
+  "conversion_log": [
+    {{"category": "FUNCTION|JOIN|SYNTAX|HINT|DATATYPE", "before": "원본 조각", "after": "변환 조각"}}
+  ],
+  "difficulty_assessment": {{
+    "has_dynamic_tags": false,
+    "has_complex_functions": true/false,
+    "has_oracle_specific_syntax": true/false,
+    "unconverted_items": ["변환하지 못했거나 사람 확인이 필요한 항목 (없으면 빈 배열)"],
+    "confidence": 0.0에서 1.0 사이의 변환 확신도
+  }},
+  "ai_guide_report": "리포트 작성 가이드 (Markdown 형식): 최상단에 '### 변환 확신도: XX%'를 명시하고, 1) 주요 변경 사항, 2) 주의사항, 3) 테스트 권장사항 순으로 작성하십시오. 바인드 파라미터 순서가 바뀌었다면 '주의사항' 최상단에 기재하십시오."
 }}
 """
 
@@ -387,10 +464,17 @@ def convert_query(
     """
     LLM을 호출하여 단일 쿼리를 변환합니다.
     model_override가 지정되면 enabled_models 내 존재할 때 한해 해당 모델을 사용합니다.
-    source_type='sql'인 경우 MyBatis XML이 아닌 PL/SQL 스크립트 전용 프롬프트를 사용합니다.
+
+    소스 종류별 프롬프트:
+      xml   — MyBatis 동적 태그 구조를 보존하는 XML 변환
+      sql   — 프로시저·함수 등 PL/SQL 스크립트 변환
+      excel — 애플리케이션 소스에서 추출한 순수 SQL 한 문장 변환 (JDBC `?` 보존)
     """
     active_model = _resolve_model(model_override)
-    is_sql_script = (source_type or "xml").lower() == "sql"
+    normalized_source = (source_type or "xml").lower()
+    is_sql_script = normalized_source == "sql"
+    is_excel = normalized_source == "excel"
+    is_plain_sql = is_sql_script or is_excel
     logger.info(
         f"[LLM] Active Model: {active_model} (override={model_override}, source_type={source_type})"
     )
@@ -408,6 +492,10 @@ def convert_query(
         # .sql 스크립트 소스에서는 출력 형식 지침을 덧붙여 보정한다.
         system_p = f"{system_p}\n\n{_SQL_SCRIPT_SYSTEM_SUFFIX}"
         user_p = _build_sql_script_user_prompt(original_sql_xml, schema_context, tag_name)
+    elif is_excel:
+        # 엑셀 소스도 XML이 아닌 순수 SQL이므로 출력 형식 지침을 덧붙인다.
+        system_p = f"{system_p}\n\n{_EXCEL_SYSTEM_SUFFIX}"
+        user_p = _build_excel_user_prompt(original_sql_xml, schema_context, tag_name)
     else:
         user_p = _build_user_prompt(original_sql_xml, schema_context, tag_name)
 
@@ -427,10 +515,19 @@ def convert_query(
 
             if parsed.get("converted_sql"):
                 sql = parsed["converted_sql"]
-                if is_sql_script:
-                    # .sql 소스: XML 래퍼는 애초에 없고, 코드펜스 혼입만 제거한다.
+                if is_plain_sql:
+                    # 순수 SQL 소스(.sql / 엑셀): XML 래퍼는 애초에 없고, 코드펜스 혼입만 제거한다.
                     # (SQL의 큰따옴표 식별자를 훼손하지 않도록 엔티티 치환은 하지 않음)
                     sql = _strip_code_fence(sql)
+                    # 일부 모델이 지시를 무시하고 단일 MyBatis 태그로 감싸는 경우만 벗겨낸다.
+                    unwrapped = re.match(
+                        r"^<(select|insert|update|delete|sql)\b[^>]*>(?P<body>.*)</\1\s*>$",
+                        sql.strip(),
+                        flags=re.DOTALL | re.IGNORECASE,
+                    )
+                    if unwrapped:
+                        sql = unwrapped.group("body")
+                        sql = re.sub(r"<!\[CDATA\[(.*?)]]>", lambda m: m.group(1), sql, flags=re.DOTALL)
                 else:
                     sql = sql.replace("&quot;", "'").replace("&apos;", "'")
                     # 일부 모델이 converted_sql에 <?xml ...?> + <mapper> 래퍼를 포함하는 경우 제거

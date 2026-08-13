@@ -95,7 +95,7 @@
                     <td>
                       <div class="success-rate-bar">
                         <div class="bar-inner" :style="{ width: calculateAccuracy(attempt) + '%', backgroundColor: getAccuracyColor(attempt) }"></div>
-                        <span class="bar-text">{{ attempt.success }}/{{ attempt.total }}</span>
+                        <span class="bar-text">{{ accuracyText(attempt) }}</span>
                       </div>
                     </td>
                     <td class="attempt-duration">{{ attempt.duration }}초</td>
@@ -165,7 +165,7 @@
               <td>
                 <div class="success-rate-bar small-bar">
                   <div class="bar-inner" :style="{ width: calculateAccuracy(item) + '%', backgroundColor: getAccuracyColor(item) }"></div>
-                  <span class="bar-text">{{ item.success }}/{{ item.total }}</span>
+                  <span class="bar-text">{{ accuracyText(item) }}</span>
                 </div>
               </td>
                 <td><span class="model-badge">{{ item.used_model || '-' }}</span></td>
@@ -326,9 +326,28 @@ export default {
       }).format(date).replace(/\. /g, '/').replace('.', '')
     },
 
+    /**
+     * Dry-run 성공률 — '미수행'은 검증 실패가 아니므로 분모에서 제외한다.
+     * (PL/SQL 블록·DDL 등 EXPLAIN 대상이 아닌 쿼리, DB 연결 불가 등)
+     */
+    attemptedCount(attempt) {
+      if (!attempt) return 0
+      return Math.max((attempt.total || 0) - (attempt.skipped || 0), 0)
+    },
+
     calculateAccuracy(attempt) {
-      if (!attempt || attempt.total === 0) return 0
-      return Math.round((attempt.success / attempt.total) * 100)
+      const attempted = this.attemptedCount(attempt)
+      if (attempted === 0) return 0
+      return Math.round((attempt.success / attempted) * 100)
+    },
+
+    /** 막대 안에 표시할 텍스트 — 미수행 건수를 함께 보여준다 */
+    accuracyText(attempt) {
+      if (!attempt) return '-'
+      const attempted = this.attemptedCount(attempt)
+      if (attempted === 0) return `미수행 ${attempt.skipped || 0}`
+      const skipped = attempt.skipped ? ` (미수행 ${attempt.skipped})` : ''
+      return `${attempt.success}/${attempted}${skipped}`
     },
 
     getAccuracyClass(attempt) {

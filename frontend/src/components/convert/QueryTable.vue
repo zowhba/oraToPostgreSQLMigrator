@@ -1,5 +1,22 @@
 <template>
-  <div class="query-table-wrapper">
+  <div>
+    <!-- Dry-run 결과 요약 — 성공/실패/미수행을 명확히 구분해서 보여준다 -->
+    <div class="dryrun-summary">
+      <span class="summary-item summary-success">
+        <b>{{ summary.success }}</b> 검증 성공
+      </span>
+      <span class="summary-item summary-fail">
+        <b>{{ summary.fail }}</b> 검증 실패
+      </span>
+      <span class="summary-item summary-skip">
+        <b>{{ summary.skip }}</b> 미수행
+      </span>
+      <span class="summary-note" v-if="summary.skip > 0">
+        미수행은 검증 실패가 아닙니다 — {{ skipBreakdown }}
+      </span>
+    </div>
+
+    <div class="query-table-wrapper">
     <table class="query-table">
       <thead>
         <tr>
@@ -36,12 +53,14 @@
         </tr>
       </tbody>
     </table>
+    </div>
   </div>
 </template>
 
 <script>
 import DifficultyBadge from './DifficultyBadge.vue'
 import DryRunResult from './DryRunResult.vue'
+import { summarizeDryRun, summarizeSkipReasons } from '../../utils/dryRunStatus.js'
 
 export default {
   name: 'QueryTable',
@@ -56,6 +75,16 @@ export default {
     }
   },
   emits: ['select'],
+  computed: {
+    /** Dry-run 성공 / 실패 / 미수행 건수 */
+    summary() {
+      return summarizeDryRun(this.queries)
+    },
+    /** 미수행 사유별 건수를 한 줄로 요약 */
+    skipBreakdown() {
+      return summarizeSkipReasons(this.queries)
+    }
+  },
   methods: {
     formatConfidence(score) {
       if (score === undefined || score === null) return '-'
@@ -71,6 +100,54 @@ export default {
 </script>
 
 <style scoped>
+/* ── Dry-run 요약 ── */
+.dryrun-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+
+.summary-item b {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.summary-success {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-color: #a5d6a7;
+}
+
+.summary-fail {
+  background: #ffebee;
+  color: #c62828;
+  border-color: #ef9a9a;
+}
+
+.summary-skip {
+  background: #eef4ff;
+  color: #33478a;
+  border-color: #c7d8ff;
+}
+
+.summary-note {
+  font-size: 12px;
+  color: #64748b;
+}
+
 .query-table-wrapper {
   overflow: auto;
   max-height: 420px;

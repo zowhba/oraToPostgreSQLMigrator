@@ -3,9 +3,11 @@
 
     <!-- 컴팩트 모드 (테이블용) -->
     <template v-if="compact">
-      <span v-if="isSkipped" class="status status-skip">⏭️ 미수행</span>
+      <span v-if="isSkipped" class="status status-skip" :title="skipTooltip">
+        ⏭️ {{ skipLabel }}
+      </span>
       <span v-else-if="result?.is_success" class="status status-success">✅ 성공</span>
-      <span v-else class="status status-fail">❌ 실패</span>
+      <span v-else class="status status-fail" :title="result?.error_message || ''">❌ 실패</span>
     </template>
 
     <!-- 상세 모드 -->
@@ -17,7 +19,7 @@
           <h4 class="title">Dry Run 결과</h4>
         </div>
         <span v-if="isSkipped" class="status-badge status-skip">
-          ⏭️ Dry-run 미수행
+          ⏭️ Dry-run {{ skipLabel }}
         </span>
         <span v-else-if="result?.is_success" class="status-badge status-success">
           ✅ EXPLAIN 성공
@@ -31,15 +33,30 @@
         <p>Dry Run 결과가 없습니다.</p>
       </div>
 
-      <!-- ────── 미수행 (.sql 소스 등) ────── -->
+      <!-- ────── 미수행 (검증 실패와 구분) ────── -->
       <div v-else-if="isSkipped" class="dry-run-body">
         <div class="section skip-section">
           <div class="section-header skip-header">
             <span class="section-icon">⏭️</span>
             <span class="section-title">{{ result.skip_reason || 'Dry-run을 수행하지 않았습니다.' }}</span>
           </div>
-          <div class="skip-block" v-if="result.error_hint">
-            <div class="skip-content" v-html="renderHint(result.error_hint)"></div>
+          <div class="skip-block">
+            <p class="skip-lead">
+              <strong>검증에 실패한 것이 아니라, 검증을 수행하지 않은 상태입니다.</strong>
+              변환 결과의 정확성은 아래 안내에 따라 직접 확인해 주세요.
+            </p>
+            <div class="skip-content" v-if="result.error_hint" v-html="renderHint(result.error_hint)"></div>
+          </div>
+        </div>
+
+        <!-- 미수행이어도 어떤 SQL을 대상으로 판단했는지 보여준다 -->
+        <div class="section" v-if="result.executed_sql">
+          <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <span class="section-title">Dry-run 대상으로 추출된 SQL</span>
+          </div>
+          <div class="sql-block">
+            <pre class="sql-code">{{ result.executed_sql }}</pre>
           </div>
         </div>
       </div>
@@ -100,6 +117,8 @@
 </template>
 
 <script>
+import { SKIP_LABELS } from '../../utils/dryRunStatus.js'
+
 export default {
   name: 'DryRunResult',
   props: {
@@ -113,9 +132,16 @@ export default {
     }
   },
   computed: {
-    /** Dry-run을 아예 수행하지 않은 경우 (.sql 스크립트 소스 등) */
+    /** Dry-run을 아예 수행하지 않은 경우 (검증 '실패'와 구분) */
     isSkipped() {
       return Boolean(this.result?.is_skipped)
+    },
+    /** 미수행 사유를 한눈에 보여주는 짧은 라벨 */
+    skipLabel() {
+      return SKIP_LABELS[this.result?.skip_category] || '미수행'
+    },
+    skipTooltip() {
+      return this.result?.skip_reason || 'Dry-run을 수행하지 않았습니다.'
     }
   },
   methods: {
@@ -145,6 +171,8 @@ export default {
   border-radius: 4px;
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
+  cursor: default;
 }
 
 .status-success {
@@ -231,6 +259,21 @@ export default {
 .skip-block {
   background: #f8fbff;
   padding: 16px;
+}
+
+.skip-lead {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #c7d8ff;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #33478a;
+  line-height: 1.7;
+}
+
+.skip-lead strong {
+  color: #1e3a8a;
 }
 
 .skip-content {

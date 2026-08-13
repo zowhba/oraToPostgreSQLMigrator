@@ -13,6 +13,15 @@ from backend.schemas.convert import DryRunResult
 logger = logging.getLogger(__name__)
 
 # DB 연결 자체가 안 되거나 스키마가 없는 경우 (SQL 문법 품질 문제 ≠ 인프라/스키마 문제)
+# Dry-run 미수행(is_skipped) 중에서도 '변환 품질 문제'를 뜻하는 사유들.
+# EXPLAIN을 돌리지 못한 것은 맞지만, 그 이유가 변환 결과가 실행 가능한 SQL 문장이
+#아니어서이므로 검증 실패와 동일하게 Level 3로 판정해야 한다.
+# (PL/SQL 블록·프로시저 호출·DDL·DB 연결 불가는 품질 문제가 아니므로 여기에 넣지 않는다)
+_QUALITY_PROBLEM_SKIP_CATEGORIES = frozenset({
+    "unsupported_statement",
+    "empty_sql",
+})
+
 _SKIP_DRYRUN_PATTERNS = [
     "DB 연결 실패",
     "could not connect",
@@ -36,10 +45,17 @@ def _is_skip_dryrun_error(dry_run_result: DryRunResult) -> bool:
 
     .sql 스크립트 소스처럼 Dry-run을 애초에 수행하지 않은 경우(is_skipped)도
     '검증 실패'가 아니므로 시그널에서 제외합니다.
+
+    단, 미수행 사유가 '변환 결과가 실행 가능한 문장이 아님'(unsupported_statement,
+    empty_sql)이라면 이는 명백한 변환 품질 문제이므로 시그널에서 제외하지 않습니다.
     """
     if dry_run_result.is_success:
         return False
     if getattr(dry_run_result, "is_skipped", False):
+        category = getattr(dry_run_result, "skip_category", None)
+        if category in _QUALITY_PROBLEM_SKIP_CATEGORIES:
+            logger.info("[Difficulty] 미수행이지만 변환 품질 문제로 간주: %s", category)
+            return False
         return True
     err = (dry_run_result.error_message or "").lower()
     return any(pattern.lower() in err for pattern in _SKIP_DRYRUN_PATTERNS)

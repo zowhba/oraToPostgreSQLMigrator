@@ -38,7 +38,10 @@
             </div>
             <div class="summary-item">
               <span class="s-label">Dry-run 성공</span>
-              <span class="s-value">{{ successCount }}/{{ detail.queries.length }}</span>
+              <span class="s-value">
+                {{ dryRunCounts.success }}/{{ dryRunCounts.attempted }}
+                <span class="s-sub" v-if="dryRunCounts.skip > 0">(미수행 {{ dryRunCounts.skip }})</span>
+              </span>
             </div>
             <div class="summary-item">
               <span class="s-label">난이도 (1/2/3)</span>
@@ -94,6 +97,8 @@
 import QueryTable from './QueryTable.vue'
 import QueryDetail from './QueryDetail.vue'
 import { getHistoryDetail } from '../../api'
+import { summarizeDryRun } from '../../utils/dryRunStatus.js'
+import { buildFallbackWorkbook, unwrapSql } from '../../utils/excelWriter.js'
 import * as XLSX from 'xlsx'
 
 export default {
@@ -115,11 +120,12 @@ export default {
     }
   },
   computed: {
-    successCount() {
-      if (!this.detail) return 0
-      return this.detail.queries.filter(
-        q => q.dry_run_result && q.dry_run_result.is_success
-      ).length
+    /**
+     * Dry-run 집계 — '미수행'은 검증 실패가 아니므로 분모에서 제외한다.
+     * (EXPLAIN 대상이 아닌 PL/SQL·DDL, DB 연결 불가 등)
+     */
+    dryRunCounts() {
+      return summarizeDryRun(this.detail ? this.detail.queries : [])
     }
   },
   watch: {
@@ -193,12 +199,15 @@ export default {
       const lower = fileName.toLowerCase()
 
       if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
-        const data = this.detail.queries.map(q => [this.stripTags(q.converted_sql)])
-        const ws = XLSX.utils.aoa_to_sheet(data)
-        const wb = XLSX.utils.book_new()
-        XLSX.utils.book_append_sheet(wb, ws, 'Converted Queries')
-        const ext = lower.endsWith('.xlsx') ? '.xlsx' : '.xls'
-        XLSX.writeFile(wb, fileName.replace(new RegExp(ext + '$', 'i'), '_postgresql' + ext))
+        // 히스토리에는 원본 엑셀 바이트가 없으므로 원본 보존 방식은 쓸 수 없다.
+        // 대신 원본/변환/난이도/Dry-run 을 컬럼으로 나눈 결과 시트를 만든다.
+        const wb = buildFallbackWorkbook({
+          results: this.detail.queries,
+          fileName,
+          usedModel: this.detail.used_model
+        })
+        // 결과는 항상 .xlsx (레거시 .xls 는 셀당 문자 수 제한으로 긴 SQL이 잘린다)
+        XLSX.writeFile(wb, fileName.replace(/\.(xlsx|xls)$/i, '') + '_postgresql.xlsx', { bookType: 'xlsx' })
         return
       }
 
@@ -235,9 +244,9 @@ export default {
       URL.revokeObjectURL(url)
     },
 
-    stripTags(xml) {
-      if (!xml) return ''
-      return xml.replace(/<[^>]+>/g, '').trim()
+    /** 변환 결과에서 순수 SQL만 정확히 추출 (excelWriter 와 동일 규칙) */
+    stripTags(sql) {
+      return unwrapSql(sql)
     }
   }
 }
@@ -341,6 +350,7 @@ export default {
 
 .s-label { font-size: 11px; color: #94a3b8; font-weight: 600; }
 .s-value { font-size: 14px; color: #1e293b; font-weight: 700; }
+.s-sub { font-size: 11.5px; color: #64748b; font-weight: 500; margin-left: 2px; }
 
 .detail-block {
   margin-top: 18px;

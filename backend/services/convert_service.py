@@ -28,8 +28,12 @@ from backend.services import history_service
 logger = logging.getLogger(__name__)
 
 # DB 연결 불가 시 재사용하는 DryRunResult
+# 접속 불가는 변환 품질 문제가 아니므로 '실패'가 아니라 '미수행'으로 표시한다.
 _DB_UNREACHABLE_RESULT = DryRunResult(
     is_success=False,
+    is_skipped=True,
+    skip_category="db_unreachable",
+    skip_reason="대상 PostgreSQL에 접속할 수 없어 Dry-run을 수행하지 못했습니다.",
     executed_sql=None,
     explain_plan=None,
     error_message="DB 연결 실패: 연결 사전 검증에서 접속 불가 확인됨",
@@ -46,6 +50,7 @@ _DB_UNREACHABLE_RESULT = DryRunResult(
 _DRYRUN_SKIPPED_RESULT = DryRunResult(
     is_success=False,
     is_skipped=True,
+    skip_category="source_policy",
     skip_reason=".sql 스크립트 소스는 Dry-run을 수행하지 않습니다.",
     executed_sql=None,
     explain_plan=None,
@@ -215,7 +220,9 @@ def stream_conversion(request: ConvertRequest):
             if skip_dryrun:
                 dry_run_result = _DRYRUN_SKIPPED_RESULT
             elif db_reachable:
-                dry_run_result = dryrun_service.execute_dry_run(db_config, converted_sql)
+                dry_run_result = dryrun_service.execute_dry_run(
+                    db_config, converted_sql, source_type=source_type
+                )
             else:
                 dry_run_result = _DB_UNREACHABLE_RESULT
 

@@ -61,6 +61,9 @@
       <span class="query-count">
         {{ queries.length }}개 {{ sourceType === 'sql' ? '오브젝트' : '쿼리' }} 발견
         <span class="source-badge" v-if="sourceType === 'sql'">Dry-run 미수행</span>
+        <span class="source-badge" v-else-if="sourceType === 'excel'">
+          Dry-run 가능 건만 검증
+        </span>
       </span>
       <div class="action-right" v-if="!loading && results.length === 0">
         <button
@@ -121,6 +124,11 @@
 
     <!-- 다운로드 버튼 -->
     <div class="action-bar" v-if="results.length > 0">
+      <span class="download-note" v-if="sourceType === 'excel'">
+        {{ excelMeta
+          ? '원본 엑셀 구조를 그대로 두고 쿼리 컬럼만 변환 결과로 치환해 내보냅니다.'
+          : '원본 파일 정보가 없어(히스토리 조회) 변환 결과만 담은 엑셀로 내보냅니다.' }}
+      </span>
       <button class="btn btn-secondary" @click="downloadResult">
         결과 파일 다운로드
       </button>
@@ -129,10 +137,12 @@
 </template>
 
 <script>
+import { markRaw } from 'vue'
 import FileUpload from '../components/convert/FileUpload.vue'
 import QueryTable from '../components/convert/QueryTable.vue'
 import QueryDetail from '../components/convert/QueryDetail.vue'
 import { convertQueriesStream, getHistoryDetail, getSettings, getEnabledModels } from '../api/index.js'
+import { buildConvertedWorkbook, buildFallbackWorkbook, unwrapSql } from '../utils/excelWriter.js'
 import * as XLSX from 'xlsx'
 
 export default {
@@ -153,6 +163,8 @@ export default {
       fileName: '',
       namespace: '',
       sourceType: 'xml',
+      // 엑셀 소스일 때만 채워짐 — 원본 워크북 바이트와 컬럼/행 매핑 정보
+      excelMeta: null,
       queries: [],
       results: [],
       selectedQuery: null,
@@ -244,6 +256,8 @@ export default {
       this.namespace = data.project_id // namespace 대신 project_id로 저장되어 있으므로 적절히 대응
       // 히스토리에는 소스 종류가 별도 저장되지 않으므로 파일명으로 추정
       this.sourceType = data.source_type || this.inferSourceType(data.xml_file_name)
+      // 히스토리에는 원본 엑셀 바이트가 없으므로 원본 보존 방식 내보내기는 불가
+      this.excelMeta = null
       this.queries = data.queries.map(q => ({
         query_id: q.query_id,
         tag_name: q.tag_name,
@@ -264,10 +278,11 @@ export default {
       return 'xml'
     },
 
-    handleFileParsed({ fileName, namespace, sourceType, queries }) {
+    handleFileParsed({ fileName, namespace, sourceType, queries, excelMeta }) {
       this.fileName = fileName
       this.namespace = namespace
       this.sourceType = sourceType || 'xml'
+      this.excelMeta = excelMeta ? markRaw(excelMeta) : null
       this.queries = queries
       this.results = []
       this.selectedQuery = null
@@ -395,33 +410,54 @@ export default {
       URL.revokeObjectURL(url)
     },
 
+    /**
+     * 엑셀 결과 다운로드
+     *
+     * 원본 워크북이 남아 있으면(= 이번 세션에서 직접 업로드한 경우)
+     * **원본을 그대로 두고 쿼리 컬럼만 변환 결과로 치환**하여 내보냅니다.
+     * 히스토리에서 불러온 경우에는 원본 바이트가 없으므로 결과만 담은 시트를 만듭니다.
+     */
     downloadExcel() {
-      // 엑셀은 XML 태그 없이 순수 SQL만 한 줄에 하나씩 추출
-      const data = this.results.map(query => {
-        // 백엔드에서 온 converted_sql에서 태그 제거 (필요시)
-        // 여기서는 사용자가 '입력파일과 동일하게' 요청했으므로 순수 SQL 추출 로직 적용
-        const pureSql = this.stripTags(query.converted_sql)
-        return [pureSql]
-      })
+      try {
+        let workbook
+        let notice = ''
 
-      const worksheet = XLSX.utils.aoa_to_sheet(data)
-      const workbook = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Converted Queries')
+        if (this.excelMeta && this.excelMeta.fileBytes) {
+          const { workbook: built, replaced, missing } = buildConvertedWorkbook({
+            meta: this.excelMeta,
+            results: this.results,
+            usedModel: this.usedModel
+          })
+          workbook = built
+          if (missing.length > 0) {
+            notice = `원본 행을 찾지 못해 치환하지 못한 쿼리 ${missing.length}건이 있습니다: ${missing.slice(0, 5).join(', ')}`
+          } else if (replaced !== this.results.length) {
+            notice = `${this.results.length}건 중 ${replaced}건만 치환되었습니다.`
+          }
+        } else {
+          workbook = buildFallbackWorkbook({
+            results: this.results,
+            fileName: this.fileName,
+            usedModel: this.usedModel
+          })
+        }
 
-      // 파일 다운로드 실행
-      const extension = this.fileName.endsWith('.xlsx') ? '.xlsx' : '.xls'
-      const downloadName = this.fileName.replace(extension, '_postgresql' + extension)
-      XLSX.writeFile(workbook, downloadName)
+        // ★ 결과는 항상 .xlsx 로 내보낸다.
+        //   레거시 .xls(BIFF8) 포맷은 셀당 문자 수 제한 때문에 긴 SQL이 잘려나간다.
+        //   (원본이 .xls 여도 읽기는 정상 처리되며, 결과만 .xlsx 로 저장된다)
+        const base = this.fileName.replace(/\.(xlsx|xls)$/i, '')
+        XLSX.writeFile(workbook, `${base}_postgresql.xlsx`, { bookType: 'xlsx' })
+
+        if (notice) alert(notice)
+      } catch (error) {
+        console.error('Excel export failed:', error)
+        alert('엑셀 내보내기 중 오류가 발생했습니다: ' + error.message)
+      }
     },
 
-    /**
-     * XML 태그를 제거하고 순수 내용만 추출 (엑셀용)
-     */
-    stripTags(xml) {
-      if (!xml) return ''
-      // <select ...> 와 </select> 태그 및 기타 MyBatis 태그 제거
-      // 가장 단순하게는 정규식으로 <...> 를 제거
-      return xml.replace(/<[^>]+>/g, '').trim()
+    /** 변환 결과에서 순수 SQL만 정확히 추출 (excelWriter 와 동일 규칙) */
+    stripTags(sql) {
+      return unwrapSql(sql)
     }
   }
 }
@@ -549,6 +585,11 @@ export default {
 .query-count {
   font-size: 14px;
   color: #666;
+}
+
+.download-note {
+  font-size: 12.5px;
+  color: #64748b;
 }
 
 .source-badge {

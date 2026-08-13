@@ -129,6 +129,9 @@ def get_history_hierarchy(allowed_project_ids: Optional[List[str]] = None) -> Li
                 c.total_input_tokens,
                 c.total_output_tokens,
                 (SELECT COUNT(*) FROM query_conversions qc WHERE qc.conversion_id = c.conversion_id AND qc.dry_run_success = TRUE) as success_count,
+                -- Dry-run '미수행'은 검증 실패가 아니므로 성공률 분모에서 제외할 수 있도록 별도 집계한다
+                (SELECT COUNT(*) FROM query_conversions qc WHERE qc.conversion_id = c.conversion_id
+                   AND (qc.dry_run_result::jsonb ->> 'is_skipped') = 'true') as skipped_count,
                 lp.input_price,
                 lp.output_price,
                 lp.price_unit
@@ -177,6 +180,7 @@ def get_history_hierarchy(allowed_project_ids: Optional[List[str]] = None) -> Li
                 "timestamp": row['created_at'].isoformat() + 'Z',
                 "total": row['total_queries'],
                 "success": row['success_count'],
+                "skipped": row['skipped_count'],
                 "duration": row['duration_seconds'],
                 "used_model": row['used_model'],
                 "levels": {
@@ -241,6 +245,9 @@ def get_history_list(allowed_project_ids: Optional[List[str]] = None) -> List[Di
                 c.total_input_tokens,
                 c.total_output_tokens,
                 (SELECT COUNT(*) FROM query_conversions qc WHERE qc.conversion_id = c.conversion_id AND qc.dry_run_success = TRUE) as success_count,
+                -- Dry-run '미수행'은 검증 실패가 아니므로 성공률 분모에서 제외할 수 있도록 별도 집계한다
+                (SELECT COUNT(*) FROM query_conversions qc WHERE qc.conversion_id = c.conversion_id
+                   AND (qc.dry_run_result::jsonb ->> 'is_skipped') = 'true') as skipped_count,
                 lp.input_price,
                 lp.output_price,
                 lp.price_unit
@@ -272,6 +279,7 @@ def get_history_list(allowed_project_ids: Optional[List[str]] = None) -> List[Di
                 "timestamp": row['created_at'].isoformat() + 'Z',
                 "total": row['total_queries'],
                 "success": row['success_count'],
+                "skipped": row['skipped_count'],
                 "duration": row['duration_seconds'],
                 "used_model": row['used_model'],
                 "levels": {

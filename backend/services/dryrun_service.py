@@ -8,7 +8,7 @@ import logging
 import psycopg2
 
 from backend.schemas.project import DBConfig
-from backend.schemas.convert import DryRunResult
+from backend.schemas.convert import DryRunResult, is_plain_sql_source
 from backend.utils.config import Config
 
 logger = logging.getLogger(__name__)
@@ -318,22 +318,156 @@ def _strip_mybatis_tags(sql_xml: str) -> str:
     return text
 
 
+def _substitute_jdbc_params(sql: str) -> str:
+    """
+    JDBC 바인드 `?` 를 NULL 로 치환합니다. (문자열 리터럴 안의 `?` 는 보존)
+
+    엑셀에 정리된 쿼리는 MyBatis `#{}` 가 아니라 PreparedStatement `?` 를 쓰는
+    경우가 대부분이라, 이 치환이 없으면 EXPLAIN 이 문법 오류로 실패합니다.
+    """
+    result: list[str] = []
+    in_string = False
+
+    for ch in sql:
+        if ch == "'":
+            in_string = not in_string
+            result.append(ch)
+        elif ch == "?" and not in_string:
+            result.append("NULL")
+        else:
+            result.append(ch)
+
+    return "".join(result)
+
+
 def _substitute_mybatis_params(sql: str) -> str:
     """
-    MyBatis 파라미터를 EXPLAIN 가능한 값으로 치환합니다.
+    쿼리 파라미터를 EXPLAIN 가능한 값으로 치환합니다.
 
     - #{param} → NULL
-    - ${param} → 1
+    - ${param} → '1'
+    - ?        → NULL  (JDBC PreparedStatement 바인드)
     """
     # #{...} → NULL
     sql = re.sub(r"#\{[^}]*\}", "NULL", sql)
-    
+
     # ${...} → '1' (문자열로 치환하여 VARCHAR/INTEGER 양쪽 호환성 확보)
     sql = re.sub(r"\$\{[^}]*\}", "'1'", sql)
-    
+
+    # ? → NULL (문자열 리터럴 내부는 보존)
+    sql = _substitute_jdbc_params(sql)
+
     # 치환 후 다시 한번 sanitize 실행 (중복 공백이나 찌꺼기 제거)
     sql = _sanitize_sql_for_dryrun(sql)
     return sql
+
+
+def _prepare_plain_sql(sql: str) -> str:
+    """
+    순수 SQL 소스(엑셀·.sql)를 Dry-run 용으로 정제합니다.
+
+    MyBatis 전용 처리(<where> 주입, 동적 태그 평탄화 등)는 순수 SQL을 오히려
+    망가뜨릴 수 있으므로 적용하지 않고, 주석 제거와 공백 정리만 수행합니다.
+    """
+    text = sql
+
+    # 혹시 모델이 CDATA/엔티티를 섞어 보낸 경우를 대비한 방어
+    text = re.sub(r"<!\[CDATA\[(.*?)]]>", lambda m: m.group(1), text, flags=re.DOTALL)
+    if "&" in text:
+        text = (text.replace("&lt;", "<").replace("&gt;", ">")
+                    .replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&"))
+
+    # 주석 제거 — 줄바꿈을 공백으로 합치기 전에 반드시 수행
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    text = re.sub(r"--[^\n\r]*", " ", text)
+
+    text = re.sub(r"\s+", " ", text).strip()
+    return _sanitize_sql_for_dryrun(text)
+
+
+# ── Dry-run 미수행 판정 ──
+#   EXPLAIN 대상이 아닌 문장은 '실패'가 아니라 '미수행'으로 분류해야
+#   난이도가 부당하게 Level 3로 떨어지지 않고, UI에서도 정확히 표시됩니다.
+_SKIP_STATEMENT_RULES: list[tuple[str, str, str]] = [
+    (
+        r"^(BEGIN|DECLARE)\b",
+        "plsql_block",
+        "PL/SQL 익명 블록(BEGIN ... END;)은 EXPLAIN 대상이 아닙니다.",
+    ),
+    (
+        r"^DO\s+\$",
+        "plsql_block",
+        "DO 블록은 EXPLAIN 대상이 아닙니다.",
+    ),
+    (
+        r"^(CALL|EXEC|EXECUTE)\b",
+        "procedure_call",
+        "프로시저 호출문은 EXPLAIN 대상이 아닙니다.",
+    ),
+    (
+        r"^(CREATE|ALTER|DROP|TRUNCATE|COMMENT|GRANT|REVOKE)\b",
+        "ddl",
+        "DDL 문은 EXPLAIN 대상이 아니며, 실행하면 대상 DB가 변경됩니다.",
+    ),
+]
+
+_SKIP_HINTS: dict[str, str] = {
+    "plsql_block": (
+        "📌 **Dry-run 미수행**: 이 쿼리는 PL/SQL 블록이라 `EXPLAIN` 으로 검증할 수 없습니다.\n\n"
+        "💡 **확인 방법**:\n"
+        "  - PostgreSQL에서는 `CALL 프로시저명(...)` 형태로 호출합니다\n"
+        "  - 호출 대상 프로시저가 대상 DB에 이식되어 있는지 먼저 확인하세요\n"
+        "  - 개발 DB에서 직접 실행하여 파라미터 개수·타입을 검증하세요"
+    ),
+    "procedure_call": (
+        "📌 **Dry-run 미수행**: 프로시저 호출문은 `EXPLAIN` 대상이 아닙니다.\n\n"
+        "💡 **확인 방법**:\n"
+        "  - 대상 DB에 동일한 프로시저가 존재하는지 확인하세요\n"
+        "  - OUT 파라미터가 있다면 PostgreSQL 함수 반환값으로 바뀌었는지 확인하세요"
+    ),
+    "ddl": (
+        "📌 **Dry-run 미수행**: DDL 문은 `EXPLAIN` 대상이 아니고, 실행하면 대상 DB가 실제로 변경됩니다.\n\n"
+        "💡 **확인 방법**: 개발 DB에 직접 반영하여 문법과 결과 오브젝트를 확인하세요."
+    ),
+    "unsupported_statement": (
+        "📌 **Dry-run 미수행**: SELECT / INSERT / UPDATE / DELETE 가 아니어서 `EXPLAIN` 을 실행할 수 없습니다.\n\n"
+        "💡 **확인 방법**:\n"
+        "  - 변환 결과가 온전한 SQL 문장인지 [SQL 비교] 탭에서 확인하세요\n"
+        "  - 원본이 여러 문장을 한 셀에 담고 있다면 문장을 분리해 다시 올려보세요"
+    ),
+    "empty_sql": (
+        "📌 **Dry-run 미수행**: 변환 결과에서 실행할 SQL을 찾지 못했습니다.\n\n"
+        "💡 **확인 방법**: 원본 셀에 SQL이 아닌 값(클래스명·메모 등)이 들어 있지 않은지 확인하세요."
+    ),
+}
+
+
+def _classify_dryrun_skip(pure_sql: str) -> tuple[str, str] | None:
+    """
+    EXPLAIN 대상이 아닌 문장인지 판별합니다.
+
+    Returns:
+        (skip_category, skip_reason) 또는 None(=Dry-run 가능)
+    """
+    head = re.sub(r"^[^a-zA-Z]+", "", pure_sql.strip()).upper()
+    for pattern, category, reason in _SKIP_STATEMENT_RULES:
+        if re.match(pattern, head, flags=re.IGNORECASE):
+            return category, reason
+    return None
+
+
+def _build_skip_result(category: str, reason: str, executed_sql: str | None) -> DryRunResult:
+    """Dry-run 미수행 결과를 만듭니다. (실패와 명확히 구분)"""
+    return DryRunResult(
+        is_success=False,
+        is_skipped=True,
+        skip_category=category,
+        skip_reason=reason,
+        executed_sql=executed_sql,
+        explain_plan=None,
+        error_message=None,
+        error_hint=_SKIP_HINTS.get(category),
+    )
 
 
 def _detect_statement_type(sql: str) -> str:
@@ -350,6 +484,10 @@ def _detect_statement_type(sql: str) -> str:
         return "UPDATE"
     elif upper.startswith("DELETE"):
         return "DELETE"
+    elif upper.startswith("MERGE"):
+        # PostgreSQL 15+ 는 MERGE 와 EXPLAIN MERGE 를 지원한다.
+        # (구버전 PG라면 EXPLAIN이 문법 오류로 실패하고, 그것이 올바른 신호다)
+        return "MERGE"
     elif upper.startswith("WITH"):
         return "SELECT"  # CTE는 보통 SELECT
     return "UNKNOWN"
@@ -545,40 +683,49 @@ def _build_error_hint(error_msg: str, executed_sql: str) -> str:
     )
 
 
-def execute_dry_run(db_config: DBConfig, converted_sql_xml: str) -> DryRunResult:
+def execute_dry_run(
+    db_config: DBConfig,
+    converted_sql_xml: str,
+    source_type: str = "xml",
+) -> DryRunResult:
     """
     변환된 SQL을 PostgreSQL에서 EXPLAIN 실행하여 검증합니다.
 
-    1. MyBatis 태그 제거 → 순수 SQL 추출
-    2. MyBatis 파라미터 치환
-    3. EXPLAIN 실행 (ANALYZE 없음 — 실제 실행 방지)
-    4. ROLLBACK 보장
-    5. 에러 발생 시 친절한 원인 설명 제공
+    1. 순수 SQL 추출 (MyBatis 소스는 태그 제거, 엑셀/.sql 소스는 주석·공백만 정리)
+    2. 파라미터 치환 (#{}, ${}, ?)
+    3. EXPLAIN 대상이 아닌 문장은 '실패'가 아니라 '미수행'으로 분류
+    4. EXPLAIN 실행 (ANALYZE 없음 — 실제 실행 방지)
+    5. ROLLBACK 보장
+    6. 에러 발생 시 친절한 원인 설명 제공
     """
     try:
-        # 순수 SQL 추출
-        pure_sql = _strip_mybatis_tags(converted_sql_xml)
+        # 순수 SQL 추출 — 소스 종류에 따라 전처리 경로가 다르다
+        if is_plain_sql_source(source_type):
+            pure_sql = _prepare_plain_sql(converted_sql_xml)
+        else:
+            pure_sql = _strip_mybatis_tags(converted_sql_xml)
         pure_sql = _substitute_mybatis_params(pure_sql)
 
         if not pure_sql or len(pure_sql) < 5:
-            error_msg = "변환된 SQL이 비어있거나 너무 짧습니다."
-            return DryRunResult(
-                is_success=False,
-                executed_sql=pure_sql or "(비어있음)",
-                explain_plan=None,
-                error_message=error_msg,
-                error_hint=_build_error_hint(error_msg, pure_sql or ""),
+            return _build_skip_result(
+                "empty_sql",
+                "변환 결과에서 실행할 SQL을 찾지 못했습니다.",
+                pure_sql or None,
             )
+
+        # EXPLAIN 대상이 아닌 문장(PL/SQL 블록·프로시저 호출·DDL)은 미수행 처리
+        skip = _classify_dryrun_skip(pure_sql)
+        if skip:
+            category, reason = skip
+            logger.info("[DryRun] 미수행(%s): %s", category, pure_sql[:80])
+            return _build_skip_result(category, reason, pure_sql)
 
         stmt_type = _detect_statement_type(pure_sql)
         if stmt_type == "UNKNOWN":
-            error_msg = f"지원하지 않는 SQL 문 유형입니다: {pure_sql[:80]}..."
-            return DryRunResult(
-                is_success=False,
-                executed_sql=pure_sql,
-                explain_plan=None,
-                error_message=error_msg,
-                error_hint=_build_error_hint(error_msg, pure_sql),
+            return _build_skip_result(
+                "unsupported_statement",
+                f"EXPLAIN 할 수 없는 문장입니다: {pure_sql[:60]}...",
+                pure_sql,
             )
 
         # PostgreSQL 접속
@@ -646,15 +793,17 @@ def execute_dry_run(db_config: DBConfig, converted_sql_xml: str) -> DryRunResult
             )
 
     except psycopg2.OperationalError as e:
+        # 접속 자체가 안 되는 것은 변환 품질 문제가 아니므로 '실패'가 아닌 '미수행'
         error_msg = f"DB 연결 실패: {str(e).strip()}"
         logger.error("[DryRun] %s", error_msg)
-        return DryRunResult(
-            is_success=False,
-            executed_sql=None,
-            explain_plan=None,
-            error_message=error_msg,
-            error_hint=_build_error_hint(error_msg, ""),
+        result = _build_skip_result(
+            "db_unreachable",
+            "대상 PostgreSQL에 접속할 수 없어 Dry-run을 수행하지 못했습니다.",
+            None,
         )
+        result.error_message = error_msg
+        result.error_hint = _build_error_hint(error_msg, "")
+        return result
     except Exception as e:
         error_msg = f"Dry-run 예외: {str(e).strip()}"
         logger.error("[DryRun] %s", error_msg)

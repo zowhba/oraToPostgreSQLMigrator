@@ -11,17 +11,44 @@ from typing import Literal, Optional
 
 # 원본 파일 종류
 #   xml   : MyBatis 매퍼 XML (기본값, 기존 동작)
-#   excel : 엑셀 쿼리 목록 (XML과 동일 파이프라인)
+#   excel : 엑셀 쿼리 목록 — XML 래핑 없는 순수 SQL, 문장별로 Dry-run 가능 여부 판정
 #   sql   : 프로시저/함수 등 순수 SQL 스크립트 — Dry-run 미수행
 SourceType = Literal["xml", "excel", "sql"]
 
-# Dry-run을 수행하지 않는 소스 종류
+# 파일 종류 자체가 Dry-run 대상이 아닌 소스
 DRYRUN_SKIP_SOURCE_TYPES: frozenset[str] = frozenset({"sql"})
+
+# MyBatis XML 래핑 없이 순수 SQL 원문을 주고받는 소스
+PLAIN_SQL_SOURCE_TYPES: frozenset[str] = frozenset({"excel", "sql"})
 
 
 def is_dryrun_skipped_source(source_type: Optional[str]) -> bool:
-    """해당 소스 종류가 Dry-run 생략 대상인지 판별합니다."""
+    """해당 소스 종류가 (파일 단위로) Dry-run 생략 대상인지 판별합니다."""
     return (source_type or "xml").lower() in DRYRUN_SKIP_SOURCE_TYPES
+
+
+def is_plain_sql_source(source_type: Optional[str]) -> bool:
+    """MyBatis 태그 없이 순수 SQL을 주고받는 소스인지 판별합니다."""
+    return (source_type or "xml").lower() in PLAIN_SQL_SOURCE_TYPES
+
+
+# Dry-run 미수행 사유 코드 — UI 배지/문구 매핑에 사용
+#   db_unreachable        : 대상 PostgreSQL에 접속할 수 없음
+#   plsql_block           : BEGIN ... END; 익명 블록 (EXPLAIN 대상 아님)
+#   procedure_call        : CALL / EXEC 프로시저 호출
+#   ddl                   : CREATE / ALTER / DROP 등 DDL
+#   unsupported_statement : 그 밖에 EXPLAIN 할 수 없는 문장
+#   empty_sql             : 변환 결과가 비어 있음
+#   source_policy         : 소스 종류 정책상 미수행 (.sql 스크립트)
+DryRunSkipCategory = Literal[
+    "db_unreachable",
+    "plsql_block",
+    "procedure_call",
+    "ddl",
+    "unsupported_statement",
+    "empty_sql",
+    "source_policy",
+]
 
 
 # ────────────────────────────────────────────
@@ -103,7 +130,13 @@ class DryRunResult(BaseModel):
             "실패(is_success=False)와 구분되며 난이도 분류에서 시그널로 사용되지 않습니다."
         ),
     )
-    skip_reason: Optional[str] = Field(None, description="Dry-run을 생략한 사유")
+    skip_category: Optional[DryRunSkipCategory] = Field(
+        None,
+        description=(
+            "Dry-run 미수행 사유 코드. UI에서 '실패'와 구분되는 배지 문구를 고르는 데 사용됩니다."
+        ),
+    )
+    skip_reason: Optional[str] = Field(None, description="Dry-run을 생략한 사유 (사람이 읽는 한 줄 설명)")
     executed_sql: Optional[str] = Field(None, description="실제 Dry-run에 사용된 SQL (MyBatis 태그 제거 후)")
     explain_plan: Optional[str] = Field(None, description="성공 시 실행 계획")
     error_message: Optional[str] = Field(None, description="실패 시 에러 메시지 (raw)")

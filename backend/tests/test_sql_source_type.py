@@ -279,8 +279,12 @@ class TestPipelineWithSqlSource:
         assert result.difficulty_level == 1
 
     def test_xml_source_still_runs_dryrun(self, monkeypatch):
-        """기존 XML 경로 회귀 방지 — DB가 없으면 Dry-run은 시도되지 않지만
-        source_type은 xml로 유지되고 결과가 skipped로 표시되지 않아야 한다."""
+        """기존 XML 경로 회귀 방지 — source_type은 xml로 유지되고,
+        소스 정책에 의한 Dry-run 생략(.sql 전용)에 걸리지 않아야 한다.
+
+        이 테스트 환경에는 DB가 없으므로 결과는 'DB 연결 불가로 미수행'이 된다.
+        (연결 불가는 변환 품질 문제가 아니므로 '실패'가 아니라 '미수행'으로 분류한다)
+        """
         calls = []
         _stub_pipeline(monkeypatch, calls)
 
@@ -290,4 +294,7 @@ class TestPipelineWithSqlSource:
 
         assert ("llm", "xml") in calls
         assert response.source_type == "xml"
-        assert response.queries[0].dry_run_result.is_skipped is False
+
+        dry_run = response.queries[0].dry_run_result
+        assert dry_run.skip_category == "db_unreachable"
+        assert dry_run.skip_category != "source_policy"

@@ -143,6 +143,7 @@ import QueryTable from '../components/convert/QueryTable.vue'
 import QueryDetail from '../components/convert/QueryDetail.vue'
 import { convertQueriesStream, getHistoryDetail, getSettings, getEnabledModels } from '../api/index.js'
 import { buildConvertedWorkbook, buildFallbackWorkbook, unwrapSql } from '../utils/excelWriter.js'
+import { buildSqlScript, formatConfidence as formatConfidenceUtil } from '../utils/sqlScriptWriter.js'
 import * as XLSX from 'xlsx'
 
 export default {
@@ -356,27 +357,16 @@ export default {
      * .sql 소스 결과 다운로드 — 오브젝트별로 구분 주석을 붙인 실행 가능한 스크립트
      */
     downloadSql() {
-      const header = [
-        '-- ============================================================',
-        `-- AQMS 변환 결과 (원본: ${this.fileName})`,
-        `-- 변환 모델: ${this.usedModel || '-'}`,
-        '-- ※ Dry-run(EXPLAIN) 검증은 수행되지 않았습니다. 개발 DB에서 직접 컴파일하여 확인하세요.',
-        '-- ============================================================',
-        ''
-      ].join('\n')
+      // 스크립트 조립 규칙은 utils/sqlScriptWriter.js 에 있다.
+      // 다운로드 파일은 개발 DB에 그대로 올라가는 산출물이라 테스트 가능한 순수 함수로 분리했다.
+      // (frontend/tests/sqlScriptWriter.test.mjs 가 개선 전 출력과의 동일성을 고정한다)
+      const content = buildSqlScript({
+        fileName: this.fileName,
+        usedModel: this.usedModel,
+        results: this.results
+      })
 
-      const body = this.results
-        .map(query => {
-          const meta = [
-            `-- ── ${query.query_id} (${query.tag_name}) ──`,
-            `-- 난이도: Level ${query.difficulty_level}` +
-              ` / 확신도: ${this.formatConfidence(query.confidence_score)}`
-          ].join('\n')
-          return `${meta}\n${query.converted_sql}\n`
-        })
-        .join('\n')
-
-      const blob = new Blob([`${header}\n${body}`], { type: 'text/plain;charset=utf-8' })
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -386,8 +376,7 @@ export default {
     },
 
     formatConfidence(score) {
-      if (score === undefined || score === null) return '-'
-      return Math.round(score * 100) + '%'
+      return formatConfidenceUtil(score)
     },
 
     downloadXml() {

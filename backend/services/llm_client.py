@@ -12,6 +12,7 @@ import requests
 
 from backend.utils.config import Config
 from backend.services import database as app_db
+from backend.services.plsql_guard import guard_plsql, is_plsql_source
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,24 @@ _MOCK_RESPONSE = {
 
 
 # .sql 스크립트 소스에서 전역/프로젝트 시스템 프롬프트에 덧붙이는 보정 지침
+# 모든 소스 종류에 공통으로 적용되는 주석 보존 정책.
+#
+# 주석은 이관 담당자가 읽는 유일한 맥락이고(작성자·티켓번호·업무 설명 등),
+# 사내 SQL 추적 표기가 담기는 자리이기도 하다. 변환 과정에서 사라지면 복구할 방법이 없으므로
+# 시스템 프롬프트 레벨에서 강하게 못박는다.
+_COMMENT_POLICY_SUFFIX = (
+    "[주석 보존 정책 — 예외 없음]\n"
+    "원본의 모든 주석을 그대로 보존하십시오. 삭제·요약·번역·재배치하지 마십시오.\n"
+    "- 대상: 블록 주석(/* ... */), 한 줄 주석(-- ...), XML 주석(<!-- ... -->) 전부\n"
+    "- 옵티마이저 힌트(/*+ ... */)와 사내 표기용 주석(/*$업무명$시스템$설명$작성자*/)도 "
+    "삭제하지 말고 원문 그대로 두십시오. PostgreSQL에서는 실행에 영향을 주지 않는 주석이며, "
+    "이관 이력을 추적하는 근거로 쓰입니다.\n"
+    "- 주석이 붙어 있던 구문을 재작성하더라도 주석은 대응되는 위치에 그대로 남기십시오.\n"
+    "- 코드가 통째로 재구성되어 원래 위치가 사라지는 경우(예: PL/SQL → PL/pgSQL)에도 "
+    "주석은 가장 가까운 대응 위치로 옮겨 반드시 살려두십시오.\n"
+    "- 주석 안의 한글·특수문자·들여쓰기를 임의로 다듬지 마십시오."
+)
+
 _SQL_SCRIPT_SYSTEM_SUFFIX = (
     "[.sql 스크립트 모드]\n"
     "이번 입력은 MyBatis XML이 아니라 Oracle 프로시저·함수·패키지 등이 담긴 순수 SQL 스크립트입니다.\n"
@@ -80,6 +99,39 @@ _SQL_SCRIPT_SYSTEM_SUFFIX = (
     "- 이 모드에서는 Dry-run(EXPLAIN) 검증이 수행되지 않습니다. 따라서 변환 확신도와 미변환 항목을 특히 보수적이고 정확하게 판정하십시오.\n"
     "- PostgreSQL에 대응 기능이 없는 요소(자율 트랜잭션, 패키지, 로컬 서브프로그램 등)는 임의로 삭제하지 말고 "
     "원본을 주석으로 남긴 뒤 unconverted_items에 반드시 포함하십시오."
+)
+
+# PL/SQL 블록에만 붙는다. is_plsql_source()가 True일 때만 append 하므로
+# 순수 SQL 한 문장(.sql / 엑셀)과 MyBatis XML 경로에는 절대 들어가지 않는다.
+# 아래 3가지는 '컴파일은 통과하고 런타임/의미에서만 터지는' 유형이라
+# Dry-run(EXPLAIN)으로 잡히지 않는다. 프롬프트로 1차 유도하고,
+# 최종 보증은 plsql_guard 모듈이 결정론적으로 수행한다.
+_PLSQL_SYSTEM_SUFFIX = (
+    "[PL/SQL 블록 전용 규칙]\n"
+    "아래는 Oracle PL/SQL(프로시저·함수·패키지·트리거·익명블록)을 PL/pgSQL로 변환할 때만 적용합니다. "
+    "순수 SQL 한 문장에는 적용하지 마십시오.\n"
+    "1. 트랜잭션 제어 — PL/pgSQL은 EXCEPTION 절을 가진 블록 안에서 COMMIT/ROLLBACK을 실행할 수 없습니다"
+    "(런타임 SQLSTATE 2D000). 원본에 EXCEPTION 핸들러가 하나라도 있으면 COMMIT/ROLLBACK을 삭제하고 "
+    "그 사실과 이유를 주석으로 남기십시오. 트랜잭션은 호출자가 관리하며, 예외 시 서브트랜잭션은 자동 롤백됩니다.\n"
+    "   이 제거는 '변환 실패'가 아니라 의도된 정상 변환입니다. 다만 호출부(WAS)가 COMMIT을 직접 해야 하므로 "
+    "unconverted_items 에는 반드시 '트랜잭션 제어를 호출자로 위임 — 호출부 COMMIT/ROLLBACK 추가 필요' 라고 "
+    "정확히 적으십시오. '변환 불가'나 '미지원' 같은 표현은 쓰지 마십시오.\n"
+    "2. SELECT ... INTO — Oracle은 0건이면 NO_DATA_FOUND, 2건 이상이면 TOO_MANY_ROWS를 던지지만 "
+    "PostgreSQL은 STRICT가 없으면 둘 다 조용히 통과합니다. 해당 SELECT가 속한 블록에 EXCEPTION 핸들러가 있으면 "
+    "핸들러 종류와 무관하게(WHEN OTHERS만 있어도) `INTO STRICT`로 변환하십시오. "
+    "단 COUNT/SUM/MIN/MAX/AVG 집계는 항상 1행이므로 STRICT를 붙이지 마십시오.\n"
+    "3. 블록 주석 — PostgreSQL은 /* */의 중첩을 지원하고 Oracle은 지원하지 않습니다. "
+    "그래서 `/*----*/ / /*-- 제목 / /*----*/` 같은 Oracle 헤더 관용구는 PG에서 이후 전체를 주석으로 삼킵니다. "
+    "블록 주석 안에 /* 가 다시 나오면 문구는 그대로 두고 짝을 맞춰 닫아 주십시오. "
+    "주석을 삭제해서 해결하지 마십시오 — 헤더·변경이력·작성자 표기는 이관 담당자의 유일한 맥락입니다.\n"
+    "4. `END <프로시저명>;` → `END;` (PG는 END 뒤 이름을 허용하지 않음). "
+    "변수 초기화 `:= \'\'` 는 Oracle에서 NULL이지만 PG에서는 빈 문자열이므로 `NULL`로 명시하십시오. "
+    "OUT 파라미터는 OUT으로 유지해 호출자 계약을 보존하십시오.\n"
+    "5. 중첩 BEGIN/EXCEPTION 하나마다 SAVEPOINT가 하나씩 생깁니다. 블록이 5개를 넘으면 "
+    "성능 검토가 필요하다는 사실을 리포트에 남기십시오.\n"
+    "6. has_oracle_specific_syntax 는 '변환 결과에 실행되는 Oracle 전용 문법이 남아 있는가'를 뜻합니다. "
+    "주석으로 보존한 원본 구문(예: `-- 원본: COMMIT;`)은 실행되지 않으므로 여기에 해당하지 않습니다. "
+    "원본이 Oracle PL/SQL이라는 사실만으로 true 로 두지 마십시오."
 )
 
 _EXCEL_SYSTEM_SUFFIX = (
@@ -105,6 +157,181 @@ def _strip_code_fence(text: str) -> str:
     if match:
         return match.group("body")
     return text
+
+
+def extract_sql_comments(text: str) -> list[str]:
+    """
+    SQL/XML 텍스트에서 주석을 추출합니다. 문자열 리터럴 안의 내용은 주석으로 보지 않습니다.
+
+    예: `SELECT '2024-01-01 -- 기준일' FROM T` 의 `-- 기준일`은 주석이 아니라 문자열입니다.
+
+    Returns:
+        주석 원문 목록 (등장 순서)
+    """
+    if not text:
+        return []
+
+    comments: list[str] = []
+    i = 0
+    length = len(text)
+
+    while i < length:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < length else ""
+
+        # 홑따옴표 문자열 ('' 이스케이프 포함)
+        if ch == "'":
+            i += 1
+            while i < length:
+                if text[i] == "'":
+                    if i + 1 < length and text[i + 1] == "'":
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            continue
+
+        # 큰따옴표 식별자
+        if ch == '"':
+            i += 1
+            while i < length and text[i] != '"':
+                i += 1
+            i += 1
+            continue
+
+        # XML 주석 <!-- ... -->
+        if text.startswith("<!--", i):
+            end = text.find("-->", i + 4)
+            end = length if end == -1 else end + 3
+            comments.append(text[i:end])
+            i = end
+            continue
+
+        # 블록 주석 /* ... */  (힌트 /*+ ... */ 포함)
+        if ch == "/" and nxt == "*":
+            end = text.find("*/", i + 2)
+            end = length if end == -1 else end + 2
+            comments.append(text[i:end])
+            i = end
+            continue
+
+        # 한 줄 주석 -- ...
+        if ch == "-" and nxt == "-":
+            end = text.find("\n", i)
+            end = length if end == -1 else end
+            comments.append(text[i:end])
+            i = end
+            continue
+
+        i += 1
+
+    return comments
+
+
+def _normalize_comment(comment: str) -> str:
+    """주석 비교용 정규화 — 공백 차이는 무시하고 내용만 본다."""
+    return re.sub(r"\s+", " ", comment).strip()
+
+
+def _nested_block_opening(comment: str) -> Optional[str]:
+    """
+    Oracle 중첩 블록주석 관용구의 '첫 조각'을 돌려줍니다.
+
+        /*----------*/
+        /*-- Use Module: SECM      <- Oracle은 여기서 닫지 않는다
+        /*----------*/
+
+    PostgreSQL은 블록주석 중첩을 지원하므로 이대로 두면 이후 전체가 주석으로 먹힌다.
+    그래서 PL/SQL 변환 시 문구는 그대로 두고 짝만 맞춰 닫아 준다
+    (전용 프롬프트 규칙 3 / plsql_guard PLSQL003).
+
+    그 결과 원문과 변환 결과의 주석 텍스트가 달라지는데 이건 '유실'이 아니라 '보정'이다.
+    이 조각으로 시작하는 주석이 결과에 있으면 살아있는 것으로 본다.
+    """
+    if not comment.startswith("/*"):
+        return None
+    inner = comment[2:]
+    idx = inner.find("/*")
+    if idx < 0:
+        return None
+    return _normalize_comment("/*" + inner[:idx]) or None
+
+
+def find_dropped_comments(original: str, converted: str) -> list[str]:
+    """
+    변환 과정에서 사라진 주석을 찾습니다.
+
+    LLM이 지시를 어기고 주석을 삭제하는 경우를 잡아내기 위한 안전망입니다.
+    위치가 바뀌거나 공백이 달라진 것은 문제 삼지 않고, '내용이 통째로 사라진' 주석만 반환합니다.
+    """
+    original_comments = extract_sql_comments(original)
+    if not original_comments:
+        return []
+
+    remaining: dict[str, int] = {}
+    for comment in extract_sql_comments(converted):
+        key = _normalize_comment(comment)
+        remaining[key] = remaining.get(key, 0) + 1
+
+    dropped: list[str] = []
+    for comment in original_comments:
+        key = _normalize_comment(comment)
+        if not key:
+            continue
+        if remaining.get(key, 0) > 0:
+            remaining[key] -= 1
+            continue
+
+        # 중첩 블록주석이 '닫히기만' 한 경우는 유실이 아니다.
+        # 이 예외가 없으면 Oracle 헤더 관용구가 있는 PL/SQL마다
+        # 매번 허위 누락 경고가 뜨고 난이도가 Level 1에서 부당하게 강등된다.
+        opening = _nested_block_opening(comment)
+        if opening:
+            match = next(
+                (k for k, cnt in remaining.items() if cnt > 0 and k.startswith(opening)),
+                None,
+            )
+            if match:
+                remaining[match] -= 1
+                continue
+
+        dropped.append(comment.strip())
+
+    return dropped
+
+
+def _build_comment_loss_warning(dropped: list[str]) -> str:
+    """AI 분석 리포트 최상단에 붙일 주석 유실 경고 블록"""
+    # 마크다운 인용문 안에 목록을 넣으려면 각 줄에 '> ' 접두사가 필요하다
+    preview = "\n".join(f"> - `{c[:120]}`" for c in dropped[:10])
+    more = f"\n> - … 외 {len(dropped) - 10}건" if len(dropped) > 10 else ""
+    return (
+        f"> ⚠️ **주석 {len(dropped)}건이 변환 결과에서 누락되었습니다.**\n"
+        f">\n"
+        f"> AQMS는 주석을 원문 그대로 보존하는 정책이지만, 이번 변환에서 아래 주석이 사라졌습니다.\n"
+        f"> 배포 전 원본과 대조해 직접 복원해 주세요. ([SQL 비교] 탭에서 확인 가능)\n"
+        f">\n"
+        f"{preview}{more}\n\n---\n\n"
+    )
+
+
+def _build_plsql_guard_notice(result) -> str:
+    """AI 분석 리포트 최상단에 붙일 PL/SQL 자동 보정 안내"""
+    fixed = [v for v in result.violations if v.auto_fixed]
+    if not fixed:
+        return ""
+    lines = "\n".join(f"> - `[{v.code}]` {v.line}행 — {v.message}" for v in fixed[:10])
+    more = f"\n> - … 외 {len(fixed) - 10}건" if len(fixed) > 10 else ""
+    return (
+        f"> 🔧 **PL/SQL 전용 자동 보정 {len(fixed)}건이 적용되었습니다.**\n"
+        f">\n"
+        f"> 아래 항목은 컴파일은 통과하지만 런타임 또는 의미에서 원본과 달라지는 것들이라\n"
+        f"> Dry-run(EXPLAIN)으로 잡히지 않습니다. AQMS가 변환 결과에 직접 반영했습니다.\n"
+        f"> 보정 위치에는 `-- [AQMS-PLSQL***]` 주석이 붙어 있으니 배포 전 확인해 주세요.\n"
+        f">\n"
+        f"{lines}{more}\n\n---\n\n"
+    )
 
 
 def _build_system_prompt() -> str:
@@ -175,7 +402,9 @@ def _build_sql_script_user_prompt(
    - 컬렉션: 연관배열/중첩테이블 → 배열 타입 또는 임시 테이블, `BULK COLLECT INTO` → `SELECT ... INTO`(단건) 또는 배열 집계,
      `FORALL` → 단일 집합 기반 DML로 재작성
    - `EXECUTE IMMEDIATE sql INTO v` → `EXECUTE sql INTO v`, `USING` 바인딩은 그대로 사용 가능
-   - 프로시저 내 `COMMIT` / `ROLLBACK`은 PG 11+ PROCEDURE에서만 가능합니다. FUNCTION으로 변환하는 경우 제거하고 그 사실을 명시하십시오.
+   - 프로시저 내 `COMMIT` / `ROLLBACK`: PG 11+ PROCEDURE라도 **EXCEPTION 절을 가진 블록 안에서는 실행할 수 없습니다**
+     (런타임 SQLSTATE 2D000 `cannot commit while a subtransaction is active`). 원본에 EXCEPTION 핸들러가 있거나
+     FUNCTION으로 변환하는 경우 제거하고, 트랜잭션을 호출자가 관리해야 한다는 사실을 주석과 리포트에 명시하십시오.
    - `SYS_REFCURSOR` → `refcursor` (OUT 파라미터로 사용 시 `OPEN v FOR ...` 그대로 대응)
    - 시퀀스: `SEQ.NEXTVAL` → `nextval('seq')`, `SEQ.CURRVAL` → `currval('seq')`
 4. SQL 문장 변환 (XML 매퍼와 동일 규칙):
@@ -186,7 +415,7 @@ def _build_sql_script_user_prompt(
    - LISTAGG / WM_CONCAT → STRING_AGG, CONNECT BY → WITH RECURSIVE
    - MERGE INTO → INSERT ... ON CONFLICT (ON 절 컬럼은 UPDATE 대상이 될 수 없음에 주의)
    - REGEXP_SUBSTR(str,'[^,]+',1,n) → `string_to_array` / `regexp_split_to_table` 등 PG 함수로 재작성
-   - Oracle 힌트(/*+ ... */) 제거
+   - ★ 주석은 옵티마이저 힌트(`/*+ ... */`)를 포함해 **전부 원문 그대로 보존**하십시오. 삭제 금지.
 5. 데이터타입: NUMBER→NUMERIC, VARCHAR2→VARCHAR, CLOB→TEXT, BLOB→BYTEA, DATE→TIMESTAMP, `%TYPE`/`%ROWTYPE`는 그대로 사용 가능
 6. ★ 날짜 연산 타입 차이 (반드시 준수):
    - Oracle에서 날짜 - 날짜 = NUMBER(일수). PostgreSQL에서는 TIMESTAMP - TIMESTAMP = INTERVAL
@@ -249,7 +478,8 @@ def _build_excel_user_prompt(
    - CONNECT BY → WITH RECURSIVE, LISTAGG / WM_CONCAT → STRING_AGG
    - MERGE INTO → INSERT ... ON CONFLICT
    - .NEXTVAL → nextval('seq'), .CURRVAL → currval('seq')
-4. Oracle 힌트(`/*+ ... */`)와 사내 표기용 주석(`/*$...$...*/`)은 제거하십시오.
+4. ★ 주석은 하나도 지우지 마십시오. 옵티마이저 힌트(`/*+ ... */`)와 사내 표기용 주석(`/*$업무명$시스템$설명$작성자*/`)도
+   원문 그대로 보존하십시오. PostgreSQL에서는 실행에 영향을 주지 않으며 이관 이력 추적에 쓰입니다.
 5. 데이터타입: NUMBER→NUMERIC, VARCHAR2→VARCHAR, CLOB→TEXT, BLOB→BYTEA, DATE→TIMESTAMP
 6. ★ 날짜 연산 타입 차이 (반드시 준수):
    - Oracle: 날짜 - 날짜 = NUMBER(일수) / PostgreSQL: TIMESTAMP - TIMESTAMP = INTERVAL
@@ -310,7 +540,8 @@ def _build_user_prompt(original_sql_xml: str, schema_context: str, tag_name: str
    - MERGE INTO → INSERT ... ON CONFLICT
    - NVL2 → CASE WHEN, LNNVL → NOT(...)
 3. 데이터타입 변환: NUMBER→NUMERIC, VARCHAR2→VARCHAR, CLOB→TEXT, DATE→TIMESTAMP 등
-4. Oracle 힌트(/*+ ... */) 제거 또는 PostgreSQL 호환 주석 변환
+4. ★ 주석 전량 보존: 블록 주석(/* */), 한 줄 주석(--), XML 주석(<!-- -->), 옵티마이저 힌트(/*+ ... */)를
+   삭제하거나 요약하지 말고 원문 그대로 두십시오.
 5. 시퀀스, 듀얼 테이블(FROM DUAL 제거) 처리
 6. Oracle CALLABLE({{CALL ...}}) 변환: PostgreSQL에서는 함수(FUNCTION)인 경우 SELECT func_name(args)을 사용하고, 프로시저(PROCEDURE, PG 11+)인 경우 CALL proc_name(args)을 사용하십시오. OUT 파라미터가 있는 경우 PG 함수는 결과를 반환하므로 적절히 대응하십시오.
 7. 속성값 내 따옴표 처리: MyBatis 태그의 test 속성 등에서 문자열 리터럴은 &quot; 대신 홑따옴표(')를 사용하십시오. (예: <if test="name == 'A'">)
@@ -475,6 +706,11 @@ def convert_query(
     is_sql_script = normalized_source == "sql"
     is_excel = normalized_source == "excel"
     is_plain_sql = is_sql_script or is_excel
+    # ── PL/SQL 게이트 ──
+    # .sql 소스이면서 실제 PL/SQL 블록일 때만 True. 이 플래그가 False면
+    # PL/SQL 전용 프롬프트도 보정 로직도 전혀 동작하지 않는다.
+    # XML(MyBatis)/엑셀 경로는 source_type 단계에서 이미 배제되므로 진입 불가.
+    is_plsql = is_sql_script and is_plsql_source(original_sql_xml)
     logger.info(
         f"[LLM] Active Model: {active_model} (override={model_override}, source_type={source_type})"
     )
@@ -491,6 +727,9 @@ def convert_query(
         # 전역/프로젝트 시스템 프롬프트는 MyBatis XML을 전제로 작성되어 있으므로
         # .sql 스크립트 소스에서는 출력 형식 지침을 덧붙여 보정한다.
         system_p = f"{system_p}\n\n{_SQL_SCRIPT_SYSTEM_SUFFIX}"
+        if is_plsql:
+            # PL/SQL 블록일 때만 전용 규칙을 덧붙인다.
+            system_p = f"{system_p}\n\n{_PLSQL_SYSTEM_SUFFIX}"
         user_p = _build_sql_script_user_prompt(original_sql_xml, schema_context, tag_name)
     elif is_excel:
         # 엑셀 소스도 XML이 아닌 순수 SQL이므로 출력 형식 지침을 덧붙인다.
@@ -498,6 +737,10 @@ def convert_query(
         user_p = _build_excel_user_prompt(original_sql_xml, schema_context, tag_name)
     else:
         user_p = _build_user_prompt(original_sql_xml, schema_context, tag_name)
+
+    # 주석 보존 정책은 소스 종류와 무관하게 항상 적용한다.
+    # 사용자가 프로젝트/전역 프롬프트를 덮어쓴 경우에도 유지되도록 마지막에 덧붙인다.
+    system_p = f"{system_p}\n\n{_COMMENT_POLICY_SUFFIX}"
 
     last_error = None
     for attempt in range(1, Config.LLM_MAX_RETRIES + 2):
@@ -535,7 +778,48 @@ def convert_query(
                     sql = re.sub(r'<mapper[^>]*>\s*', '', sql)
                     sql = re.sub(r'\s*</mapper>\s*$', '', sql.rstrip())
                 parsed["converted_sql"] = sql.strip()
-            
+
+                # ── 주석 보존 검증 (안전망) ──
+                # 프롬프트로 지시했더라도 모델이 주석을 지우는 경우가 있어 실제 결과를 대조한다.
+                dropped = find_dropped_comments(original_sql_xml, parsed["converted_sql"])
+                if dropped:
+                    logger.warning(
+                        "[LLM] 주석 %d건 누락 감지 (source_type=%s): %s",
+                        len(dropped),
+                        source_type,
+                        " | ".join(c[:60] for c in dropped[:3]),
+                    )
+                    parsed["ai_guide_report"] = (
+                        _build_comment_loss_warning(dropped)
+                        + (parsed.get("ai_guide_report") or "")
+                    )
+                    parsed.setdefault("difficulty_assessment", {})
+                    parsed["difficulty_assessment"]["dropped_comments"] = len(dropped)
+
+                # ── PL/SQL 전용 결정론적 보정 (안전망) ──
+                # 프롬프트로 지시해도 모델이 놓치는 3가지를 코드로 강제한다.
+                # 주석 유실 검사 '뒤'에 두는 이유: 보정이 주석을 덧붙이므로
+                # 먼저 돌리면 유실 판정이 흔들린다.
+                if is_plsql:
+                    guard = guard_plsql(parsed["converted_sql"])
+                    guard_fixes = [v for v in guard.violations if v.auto_fixed]
+                    if guard_fixes:
+                        parsed["converted_sql"] = guard.sql
+                        logger.warning(
+                            "[LLM] PL/SQL 자동 보정 %d건: %s",
+                            len(guard_fixes),
+                            ", ".join(sorted({v.code for v in guard_fixes})),
+                        )
+                        parsed["ai_guide_report"] = (
+                            _build_plsql_guard_notice(guard)
+                            + (parsed.get("ai_guide_report") or "")
+                        )
+                        parsed.setdefault("difficulty_assessment", {})
+                        parsed["difficulty_assessment"]["plsql_guard_fixes"] = len(guard_fixes)
+                        parsed["difficulty_assessment"]["plsql_guard_codes"] = sorted(
+                            {v.code for v in guard_fixes}
+                        )
+
             return parsed
 
         except ValueError as ve:

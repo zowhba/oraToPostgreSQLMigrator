@@ -157,6 +157,16 @@ class QueryResult(BaseModel):
     confidence_score: float = Field(0.0, description="AI 변환 확신도 (0.0 ~ 1.0)")
     input_tokens: int = Field(0, description="LLM 입력 토큰 수")
     output_tokens: int = Field(0, description="LLM 출력 토큰 수")
+    # PL/SQL 전용 자동 보정 결과. PL/SQL 블록이 아니면 항상 0 / 빈 배열이라
+    # 기존 XML·엑셀·단문 SQL 응답의 값은 달라지지 않는다.
+    plsql_guard_fixes: int = Field(0, description="PL/SQL 자동 보정 건수 (0이면 보정 없음)")
+    plsql_guard_codes: list[str] = Field(
+        default_factory=list, description="적용된 보정 코드 (예: PLSQL001)"
+    )
+    # 난이도를 그렇게 판정한 이유. 로그에만 남기면 사용자가 확인할 방법이 없다.
+    difficulty_reasons: list[str] = Field(
+        default_factory=list, description="난이도 판정 사유 (Level 1이고 사유가 없으면 빈 배열)"
+    )
 
 
 class ConvertResponse(BaseModel):

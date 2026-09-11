@@ -66,12 +66,22 @@ def classify_difficulty(
     llm_assessment: dict,
     conversion_log: list[dict],
 ) -> int:
+    """레벨만 필요한 호출부를 위한 래퍼. 기존 시그니처를 그대로 유지한다."""
+    return evaluate_difficulty(dry_run_result, llm_assessment, conversion_log)[0]
+
+
+def evaluate_difficulty(
+    dry_run_result: DryRunResult,
+    llm_assessment: dict,
+    conversion_log: list[dict],
+) -> tuple[int, list[str]]:
     """
     다중 시그널 기반 Difficulty Level 결정
 
     입력 시그널:
     1. dry_run_result.is_success  — DB 검증 통과 여부 (가장 강력한 시그널)
     2. llm_assessment.confidence  — LLM 자체 확신도 (0.0~1.0)
+       (+ dropped_comments / plsql_guard_fixes 는 Level 1 차단 시그널)
     3. llm_assessment.unconverted_items — 변환 불가 요소 수
     4. llm_assessment.has_oracle_specific_syntax — Oracle 전용 문법 잔존
     5. conversion_log 내 category 분석 — 복잡 변환 포함 여부
@@ -80,12 +90,18 @@ def classify_difficulty(
     LLM 기반 시그널만으로 분류합니다.
 
     Returns:
-        int: 1, 2, 또는 3
+        (레벨, 사유 목록). 사유는 화면에 그대로 노출되므로 사람이 읽는 문장으로 쓴다.
+        로그에만 남기면 "왜 Level 2지?"를 물을 때마다 서버 로그를 봐야 한다.
     """
     confidence = llm_assessment.get("confidence", 0.5)
     unconverted = llm_assessment.get("unconverted_items", [])
     has_oracle_syntax = llm_assessment.get("has_oracle_specific_syntax", False)
     has_complex_functions = llm_assessment.get("has_complex_functions", False)
+    # 주석이 유실되면 사람이 원본과 대조해 복원해야 하므로 '완전 자동'일 수 없다
+    dropped_comments = llm_assessment.get("dropped_comments", 0)
+    # PL/SQL 자동 보정이 걸렸다는 것은 LLM 출력이 그대로는 동작하지 않았다는 뜻이다.
+    # 보정 자체는 검증된 결정론적 변환이지만, 사람이 보정 위치를 확인해야 하므로 '완전 자동'일 수 없다.
+    plsql_guard_fixes = llm_assessment.get("plsql_guard_fixes", 0)
 
     # 복잡 변환 카테고리 분석
     complex_categories = {"JOIN", "HINT"}
@@ -113,22 +129,22 @@ def classify_difficulty(
                 )
         else:
             # SQL EXPLAIN 실패 → 실제 변환 품질 문제 → Level 3
-            logger.info(
-                "[Difficulty] Level 3 — Dry-run SQL 오류: %s",
-                dry_run_result.error_message or "(에러 메시지 없음)",
-            )
-            return 3
+            err = dry_run_result.error_message or "(에러 메시지 없음)"
+            logger.info("[Difficulty] Level 3 — Dry-run SQL 오류: %s", err)
+            return 3, [f"Dry-run SQL 오류: {err}"]
 
     # ── Level 3 판정 (LLM 시그널 기반) ──
     # 시그널 2: LLM 확신도 매우 낮음
     if confidence < 0.7:
         logger.info("[Difficulty] Level 3 — LLM confidence %.2f < 0.7", confidence)
-        return 3
+        return 3, [f"변환 확신도 {confidence:.0%} (70% 미만)"]
 
     # 시그널 3: 미변환 항목 3개 이상
     if len(unconverted) >= 3:
         logger.info("[Difficulty] Level 3 — 미변환 항목 %d개 ≥ 3", len(unconverted))
-        return 3
+        return 3, [f"미변환 항목 {len(unconverted)}건 (3건 이상)"] + [
+            f"· {str(item)[:120]}" for item in unconverted[:5]
+        ]
 
     # ── Level 1 판정 ──
     # Dry-run 성공(또는 DB 미연결 시 LLM 시그널만) + 모든 시그널 양호
@@ -138,10 +154,12 @@ def classify_difficulty(
         and len(unconverted) == 0
         and not has_oracle_syntax
         and not has_complex_conversion
+        and not dropped_comments
+        and not plsql_guard_fixes
     ):
         suffix = "" if dryrun_available else " (Dry-run 미검증)"
         logger.info("[Difficulty] Level 1 — 완전 자동 (confidence=%.2f)%s", confidence, suffix)
-        return 1
+        return 1, ([] if dryrun_available else ["Dry-run 미검증 (LLM 시그널만으로 판정)"])
 
     # ── Level 2 (나머지) ──
     reasons = []
@@ -155,6 +173,15 @@ def classify_difficulty(
         reasons.append("Oracle 문법 잔존")
     if has_complex_conversion:
         reasons.append("복잡 변환(JOIN/HINT) 포함")
+    if dropped_comments:
+        reasons.append(f"주석 {dropped_comments}건 누락")
+    if plsql_guard_fixes:
+        reasons.append(f"PL/SQL 자동 보정 {plsql_guard_fixes}건")
+
+    # 미변환 항목은 건수만으로는 무슨 일인지 알 수 없다. 실제 문구를 같이 보여준다.
+    # (예: COMMIT 제거로 트랜잭션 제어가 호출자로 넘어간 경우 — 호출부 수정이 필요하다)
+    for item in unconverted[:5]:
+        reasons.append(f"· {str(item)[:120]}")
 
     logger.info("[Difficulty] Level 2 — AI 보정 필요 (%s)", ", ".join(reasons))
-    return 2
+    return 2, reasons

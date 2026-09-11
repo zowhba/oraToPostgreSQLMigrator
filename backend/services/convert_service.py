@@ -22,7 +22,7 @@ from backend.services import project_service
 from backend.services import llm_client
 from backend.services import schema_fetcher
 from backend.services import dryrun_service
-from backend.services.difficulty_classifier import classify_difficulty
+from backend.services.difficulty_classifier import evaluate_difficulty
 from backend.services import history_service
 
 logger = logging.getLogger(__name__)
@@ -226,7 +226,7 @@ def stream_conversion(request: ConvertRequest):
             else:
                 dry_run_result = _DB_UNREACHABLE_RESULT
 
-            difficulty_level = classify_difficulty(
+            difficulty_level, difficulty_reasons = evaluate_difficulty(
                 dry_run_result=dry_run_result,
                 llm_assessment=difficulty_assessment,
                 conversion_log=conversion_log_raw,
@@ -245,6 +245,9 @@ def stream_conversion(request: ConvertRequest):
                 confidence_score=confidence_score,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                plsql_guard_fixes=difficulty_assessment.get("plsql_guard_fixes", 0),
+                plsql_guard_codes=difficulty_assessment.get("plsql_guard_codes", []),
+                difficulty_reasons=difficulty_reasons,
             )
 
         except Exception as e:

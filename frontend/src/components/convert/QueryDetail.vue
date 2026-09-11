@@ -10,6 +10,18 @@
       <button class="btn-close" @click="$emit('close')">닫기</button>
     </div>
 
+    <!-- 난이도 판정 사유 -->
+    <!-- 왜 이 난이도인지 화면에서 알 수 없으면 매번 서버 로그를 봐야 한다. -->
+    <div
+      v-if="query.difficulty_reasons && query.difficulty_reasons.length"
+      class="difficulty-reasons"
+    >
+      <span class="reasons-title">Level {{ query.difficulty_level }} 판정 사유</span>
+      <ul>
+        <li v-for="(reason, i) in query.difficulty_reasons" :key="i">{{ reason }}</li>
+      </ul>
+    </div>
+
     <!-- 탭 -->
     <div class="tabs">
       <button
@@ -118,6 +130,29 @@ export default {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.difficulty-reasons {
+  padding: 12px 24px;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+  font-size: 13px;
+  color: #78350f;
+}
+
+.reasons-title {
+  font-weight: 700;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.difficulty-reasons ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.difficulty-reasons li {
+  line-height: 1.6;
 }
 
 .query-id {

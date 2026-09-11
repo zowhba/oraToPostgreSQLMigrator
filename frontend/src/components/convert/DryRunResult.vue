@@ -67,7 +67,10 @@
         <div class="section" v-if="result.executed_sql">
           <div class="section-header">
             <span class="section-icon">🔍</span>
-            <span class="section-title">실행된 SQL (MyBatis 태그 제거 후)</span>
+            <span class="section-title">
+              EXPLAIN 검증에 사용한 SQL
+              <span class="section-note">— 검증용으로만 태그·주석·파라미터를 정리한 것입니다. 다운로드 파일에는 주석이 그대로 남습니다.</span>
+            </span>
           </div>
           <div class="sql-block">
             <pre class="sql-code">{{ result.executed_sql }}</pre>
@@ -325,6 +328,12 @@ export default {
   font-size: 13px;
   font-weight: 600;
   color: #444;
+}
+
+.section-note {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: #94a3b8;
 }
 
 /* ── 실행된 SQL ── */

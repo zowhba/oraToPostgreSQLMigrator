@@ -203,6 +203,45 @@ test('toJavaSnippet 은 따옴표·역슬래시를 이스케이프한다', () =>
   assert.equal(snippet, 'q  = "SELECT \\"A\\" FROM T \\n";')
 })
 
+test('한 줄 주석이 있는 긴 줄은 접지 않는다 (주석 뒷부분이 실행되면 안 됨)', () => {
+  const long = `SELECT ${Array.from({ length: 40 }, (_, i) => `COL_${i}`).join(', ')} FROM T -- 전체 컬럼 조회`
+  assert.ok(long.length > 160)
+
+  const lines = toJavaSnippet(long, 'Sql', 'assign').split('\n')
+  assert.equal(lines.length, 1, '주석이 있는 줄은 한 줄로 유지되어야 한다')
+  assert.match(lines[0], /-- 전체 컬럼 조회/)
+})
+
+test('주석 없는 긴 줄은 기존대로 접는다', () => {
+  const long = `SELECT ${Array.from({ length: 40 }, (_, i) => `COL_${i}`).join(', ')} FROM T`
+  const lines = toJavaSnippet(long, 'Sql', 'assign').split('\n')
+  assert.ok(lines.length > 1)
+})
+
+test('문자열 안의 -- 는 주석으로 보지 않는다', () => {
+  const long = `SELECT '2024-01-01' AS D, ${Array.from({ length: 40 }, (_, i) => `COL_${i}`).join(', ')} FROM T`
+  const lines = toJavaSnippet(long, 'Sql', 'assign').split('\n')
+  assert.ok(lines.length > 1, '문자열 안의 하이픈 때문에 접기가 막히면 안 된다')
+})
+
+test('주석은 변환 결과 셀에 그대로 남는다', () => {
+  const sql = [
+    '-- 공지 목록 조회',
+    'SELECT /*+INDEX(T IDX)$조회$EDMP$설명$정현희*/ A',
+    '  FROM T  -- 대상 테이블'
+  ].join('\n')
+
+  const snippet = toJavaSnippet(sql, 'Sql', 'assign')
+  assert.match(snippet, /-- 공지 목록 조회/)
+  assert.match(snippet, /\/\*\+INDEX\(T IDX\)\$조회\$EDMP\$설명\$정현희\*\//)
+  assert.match(snippet, /-- 대상 테이블/)
+})
+
+test('unwrapSql 은 주석을 지우지 않는다', () => {
+  const sql = '-- 머리 주석\nSELECT /*+INDEX(T IDX)*/ A FROM T -- 꼬리 주석'
+  assert.equal(unwrapSql(`<select id="a"><![CDATA[${sql}]]></select>`), sql)
+})
+
 // ────────────────────────────────────────────
 // 결과 내보내기 — 원본 보존
 // ────────────────────────────────────────────

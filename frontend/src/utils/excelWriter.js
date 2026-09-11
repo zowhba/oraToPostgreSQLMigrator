@@ -64,8 +64,24 @@ export function unwrapSql(text) {
 /** 한 줄이 너무 길면 읽기 좋게 공백 경계에서 접는다 */
 const MAX_LINE_WIDTH = 160
 
+/** 문자열 리터럴 밖에 한 줄 주석(--)이 있는지 */
+function hasLineComment(line) {
+  let inString = false
+  for (let i = 0; i < line.length - 1; i += 1) {
+    const ch = line[i]
+    if (ch === "'") inString = !inString
+    else if (!inString && ch === '-' && line[i + 1] === '-') return true
+  }
+  return false
+}
+
 function softWrap(line) {
   if (line.length <= MAX_LINE_WIDTH) return [line]
+
+  // ★ 한 줄 주석이 있는 줄은 접지 않는다.
+  //   `SELECT A -- 설명` 을 접으면 주석 뒷부분이 다음 줄로 넘어가면서
+  //   주석이 아닌 실행 구문이 되어버린다. (반대로 앞부분이 주석에 먹힐 수도 있다)
+  if (hasLineComment(line)) return [line]
 
   const words = line.split(/(\s+)/)
   const wrapped = []

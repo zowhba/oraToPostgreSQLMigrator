@@ -121,6 +121,12 @@ def init_tables():
     cur.execute("ALTER TABLE conversions ADD COLUMN IF NOT EXISTS total_input_tokens INTEGER DEFAULT 0")
     cur.execute("ALTER TABLE conversions ADD COLUMN IF NOT EXISTS total_output_tokens INTEGER DEFAULT 0")
 
+    # 난이도 판정 사유 / PL/SQL 자동 보정 결과
+    # 저장하지 않으면 히스토리에서 결과를 다시 열었을 때 판정 사유가 사라진다.
+    cur.execute("ALTER TABLE query_conversions ADD COLUMN IF NOT EXISTS difficulty_reasons JSONB DEFAULT '[]'::jsonb")
+    cur.execute("ALTER TABLE query_conversions ADD COLUMN IF NOT EXISTS plsql_guard_fixes INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE query_conversions ADD COLUMN IF NOT EXISTS plsql_guard_codes JSONB DEFAULT '[]'::jsonb")
+
     # 토큰 사용량 컬럼 추가 (query_conversions)
     cur.execute("ALTER TABLE query_conversions ADD COLUMN IF NOT EXISTS input_tokens INTEGER DEFAULT 0")
     cur.execute("ALTER TABLE query_conversions ADD COLUMN IF NOT EXISTS output_tokens INTEGER DEFAULT 0")

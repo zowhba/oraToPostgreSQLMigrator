@@ -61,8 +61,9 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
                     conversion_id, query_id, tag_name, difficulty_level,
                     original_sql_xml, converted_sql, conversion_log,
                     dry_run_success, dry_run_result, ai_guide_report, confidence_score,
-                    input_tokens, output_tokens
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    input_tokens, output_tokens,
+                    difficulty_reasons, plsql_guard_fixes, plsql_guard_codes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     conversion_id,
@@ -77,7 +78,10 @@ def save_conversion_history(request: ConvertRequest, response: ConvertResponse):
                     res.ai_guide_report,
                     res.confidence_score,
                     res.input_tokens,
-                    res.output_tokens
+                    res.output_tokens,
+                    json.dumps(res.difficulty_reasons, ensure_ascii=False),
+                    res.plsql_guard_fixes,
+                    json.dumps(res.plsql_guard_codes, ensure_ascii=False)
                 )
             )
 

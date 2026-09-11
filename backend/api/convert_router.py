@@ -84,6 +84,19 @@ async def get_history_flat(user: CurrentUser = Depends(require_viewer)):
     }
 
 
+def _as_list(value):
+    """JSONB 컬럼을 리스트로 되돌린다. 컬럼 추가 이전 이력은 NULL 이다."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return value if isinstance(value, list) else []
+
+
 @router.get("/history/{conversion_id}")
 async def get_history_detail(conversion_id: int, user: CurrentUser = Depends(require_viewer)):
     """특정 변환 히스토리 상세 조회 — 접근 허용된 프로젝트만"""
@@ -125,7 +138,11 @@ async def get_history_detail(conversion_id: int, user: CurrentUser = Depends(req
                 "conversion_log": json.loads(q["conversion_log"]) if isinstance(q["conversion_log"], str) else q["conversion_log"],
                 "dry_run_result": json.loads(q["dry_run_result"]) if isinstance(q["dry_run_result"], str) else q["dry_run_result"],
                 "ai_guide_report": q["ai_guide_report"],
-                "confidence_score": q.get("confidence_score", 0.0)
+                "confidence_score": q.get("confidence_score", 0.0),
+                # 컬럼 추가 이전에 저장된 이력은 NULL 이므로 기본값으로 채운다
+                "difficulty_reasons": _as_list(q.get("difficulty_reasons")),
+                "plsql_guard_fixes": q.get("plsql_guard_fixes") or 0,
+                "plsql_guard_codes": _as_list(q.get("plsql_guard_codes")),
             })
 
         created_at = master.get("created_at")

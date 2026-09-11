@@ -175,6 +175,22 @@ class TestPromptPolicy:
 
         assert "보존" in prompt
 
+    def test_plsql_suffix_follows_the_same_policy(self):
+        """
+        PL/SQL 전용 규칙도 같은 정책을 따라야 한다.
+
+        이 프롬프트는 중첩 블록주석을 다루는데, '삭제'로 해결하라고 적으면
+        Oracle 헤더(작성자·변경이력)가 통째로 사라진다. 실제로 그렇게 사라진 적이 있다.
+        """
+        suffix = llm_client._PLSQL_SYSTEM_SUFFIX
+
+        forbidden = ["주석을 제거", "주석은 제거", "힌트(/*+ ... */) 제거"]
+        for phrase in forbidden:
+            assert phrase not in suffix, f"'{phrase}' 지시가 남아 있습니다"
+
+        assert "주석을 삭제해서 해결하지 마십시오" in suffix
+        assert "문구는 그대로 두고 짝을 맞춰 닫아" in suffix
+
 
 # ────────────────────────────────────────────
 # 난이도 연계

@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:excel": "node --test tests/excel.test.mjs",
-    "test:sqlscript": "node --test tests/sqlScriptWriter.test.mjs"
+    "test:sqlscript": "node --test tests/sqlScriptWriter.test.mjs",
+    "test:linealign": "node --test tests/lineAlign.test.mjs"
   },
   "dependencies": {
     "axios": "^1.6.0",
